@@ -1,0 +1,42 @@
+{
+  "info": {
+    "_postman_id": "a2a3ab2a-9f54-4f1d-8bde-6d6a637dtest",
+    "name": "Posts API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Sample Postman collection to exercise the posts API."
+  },
+  "item": [
+    {
+      "name": "Get all posts",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/posts",
+          "host": ["{{base_url}}"],
+          "path": ["posts"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get post by id",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/posts/1",
+          "host": ["{{base_url}}"],
+          "path": ["posts", "1"]
+        }
+      },
+      "response": []
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3000"
+    }
+  ]
+}
