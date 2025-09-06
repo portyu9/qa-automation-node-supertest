@@ -72,7 +72,3 @@ qa-api-supertest/
 ### Extensibility
 
 This starter is intentionally small but extensible.  I have shown how to decouple HTTP clients, how to write tests that don’t depend on a running server, and how to verify response contracts.  Feel free to add more endpoints, mock services (for example using [Mock Service Worker](https://mswjs.io) or WireMock), or even a database layer.  You could also extend the Pact configuration to publish pacts to a broker and have provider tests verify them.
-
-### License
-
-This repository is licensed under the MIT License – see the `LICENSE` file for details.
