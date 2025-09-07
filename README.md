@@ -1,6 +1,6 @@
 ## API Testing Framework – SuperTest, Jest & Pact
 
-I created this API‑testing repository to demonstrate a practical, production‑ready way of testing service‑layer APIs using JavaScript.  The project is built on top of **Node.js**, **Express**, **SuperTest**, **Jest**, and **Pact**, and it uses a public API (JSONPlaceholder) to give the tests a real target.  Everything is designed around separation of concerns: there is a minimal HTTP server, a service client for the upstream API, a set of tests grouped by feature, and contract tests that validate payload structure.
+I created this API‑testing repository to demonstrate a practical, production‑ready way of testing service‑layer APIs using JavaScript.  The project is built on top of **Node.js**, **Express**, **SuperTest**, **Jest**, and **Pact**, and it uses a public API (JSONPlaceholder) to give the tests a real target.  Everything is designed around separation of concerns: there is a minimal HTTP server, a service client for the upstream API, a set of tests grouped by feature, and contract tests that validate payload structure with GitHub Actions CI.
 
 ### Key Features
 
