@@ -1,19 +1,80 @@
 # Dependency-boundary testing
 
+## Boundary map
+
+The framework distinguishes four dependency surfaces so failures are attributable rather than collapsed into one integration test.
+
+| Boundary | What is real | What is substituted | Primary assertions |
+| --- | --- | --- | --- |
+| Component | Express middleware/routes | Upstream client | HTTP validation, envelopes, correlation, error translation |
+| Transport | `JsonPlaceholderClient` | Axios transport in unit tests | Base URL, timeout, resource paths, error normalization |
+| Consumer contract | Real client HTTP behavior | Pact mock provider | Consumer/provider interaction expectations |
+| Live integration | Real client + provider | Nothing | Environment/provider compatibility; opt-in only |
+
 ## Component boundary
 
 Supertest component tests exercise the Express request/response pipeline in-process and inject an upstream client double. They must not depend on DNS, public APIs, fixed ports, or external service availability.
 
-The injected double is intentionally defined at the client boundary (`getPosts()` / `getPost(id)`) rather than by mocking Express internals. This keeps route tests focused on HTTP input validation, status codes, response envelopes, correlation IDs, and dependency-failure translation.
+The injected double is defined at the client boundary (`getPosts()` / `getPost(id)`) rather than by mocking Express internals. Route tests can therefore prove:
+
+- path/input validation;
+- status and JSON envelope semantics;
+- inbound request correlation;
+- whether an invalid request was rejected before dependency invocation;
+- dependency-failure translation.
 
 ## Transport boundary
 
-`JsonPlaceholderClient` owns outbound HTTP transport configuration. Its unit contract verifies that the validated base URL and timeout budget are passed to Axios and that logical client operations map to the expected resource paths.
+`JsonPlaceholderClient` owns outbound HTTP transport configuration. Its contract verifies that validated base URL and timeout budgets reach Axios and that logical operations map to expected resource paths.
+
+Raw Axios failures are normalized immediately. Routes should not branch on Axios-specific error structures.
+
+## Stable dependency-error taxonomy
+
+The public API uses three distinct server/dependency failure classes:
+
+| Condition | Public HTTP status | Public error code | Meaning |
+| --- | ---: | --- | --- |
+| Upstream timeout (`ECONNABORTED`, `ETIMEDOUT`) | 504 | `upstream_timeout` | Dependency did not complete within the client timeout budget |
+| Other upstream transport failure | 502 | `upstream_unavailable` | Dependency could not be reached/used, but this is not classified as timeout |
+| Unexpected application exception | 500 | `internal_server_error` | Failure is not a normalized upstream transport condition |
+
+This distinction is part of the API contract and has deterministic component/transport tests.
+
+### What remains internal
+
+The underlying transport exception is retained as the JavaScript `cause` on `UpstreamServiceError` for debugging. It is not serialized into the public response.
+
+Safe server logs include a small allowlist: request ID, error class, public code, and status. They intentionally exclude:
+
+- request/response bodies;
+- authorization headers;
+- cookies;
+- upstream URLs containing runtime credentials;
+- raw upstream exception messages.
+
+The response envelope remains stable even when the dependency library changes.
 
 ## Consumer-contract boundary
 
-Pact tests exercise the real client implementation against Pact's generated mock server. They verify the consumer's HTTP expectations without contacting the public provider. Generated pact files are artifacts for provider verification and are not substitutes for route/component tests.
+Pact tests exercise the real client implementation against Pact's generated mock server. They verify the consumer's HTTP expectations without contacting the public provider. Generated Pact files are reviewable provider-verification artifacts and are not substitutes for route/component tests.
+
+A Pact mismatch answers a different question from a 502/504 component test: Pact describes the expected interaction, while component tests describe how this service behaves when its dependency succeeds or fails.
 
 ## Live integration boundary
 
 A live-provider integration test, when required, belongs in a separate opt-in CI job with an explicitly configured environment. It should have bounded timeouts, clear ownership, and failure semantics that distinguish provider availability from consumer implementation defects.
+
+Live-provider failures should not weaken deterministic component assertions. If a provider is temporarily unavailable, that is an environment/dependency signal, not a reason to accept an incorrect public error mapping.
+
+## Adding a dependency
+
+When a new external dependency is introduced:
+
+1. define an application-facing client interface/shape;
+2. inject it into component composition;
+3. test route behavior with a deterministic double;
+4. centralize transport configuration in the concrete client;
+5. define a stable public error taxonomy before exposing raw library errors;
+6. retain detailed cause information internally only;
+7. add contract/live layers only where they answer a distinct integration question.

@@ -23,14 +23,20 @@ describe('framework contracts', () => {
     );
   });
 
-  test('invalid configuration fails before the server is started', () => {
-    const original = process.env.REQUEST_TIMEOUT_MS;
+  test.each([
+    ['REQUEST_TIMEOUT_MS', '0'],
+    ['UPSTREAM_BASE_URL', 'localhost:8080'],
+    ['UPSTREAM_BASE_URL', 'https://user:password@example.test'],
+    ['UPSTREAM_BASE_URL', 'https://example.test/api?access_token=secret'],
+    ['UPSTREAM_BASE_URL', 'https://example.test/api#fragment'],
+  ])('invalid %s configuration fails before server startup', (name, value) => {
+    const original = process.env[name];
     try {
-      process.env.REQUEST_TIMEOUT_MS = '0';
-      expect(() => loadConfig()).toThrow('REQUEST_TIMEOUT_MS');
+      process.env[name] = value;
+      expect(() => loadConfig()).toThrow(name);
     } finally {
-      if (original === undefined) delete process.env.REQUEST_TIMEOUT_MS;
-      else process.env.REQUEST_TIMEOUT_MS = original;
+      if (original === undefined) delete process.env[name];
+      else process.env[name] = original;
     }
   });
 });
