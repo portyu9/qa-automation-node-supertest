@@ -1,62 +1,37 @@
-const path = require('path');
-const fs = require('fs');
-const { Pact, Matchers } = require('@pact-foundation/pact');
-const axios = require('axios');
+const path = require('node:path');
+const { Pact, Matchers, SpecificationVersion } = require('@pact-foundation/pact');
+const JsonPlaceholderClient = require('../clients/jsonPlaceholderClient');
 
-// This contract test uses Pact to define the expected interaction between a
-// consumer and a provider for the Posts API.  It spins up a mock provider,
-// registers an interaction, performs the request, and then verifies that
-// the provider returned the expected payload.  The resulting pact file will
-// be written into the `.pact` directory when the test runs.
+const pact = new Pact({
+  consumer: 'PostsConsumer',
+  provider: 'PostsProvider',
+  dir: path.resolve(process.cwd(), 'pacts'),
+  logLevel: 'warn',
+  spec: SpecificationVersion.SPECIFICATION_VERSION_V4,
+});
 
-describe('Pact contract for Posts API', () => {
-  // Ensure log and pact output directories exist before running Pact
-  const logsDir = path.resolve(process.cwd(), 'logs');
-  const pactDir = path.resolve(process.cwd(), '.pact');
-  if (!fs.existsSync(logsDir)) {
-    fs.mkdirSync(logsDir, { recursive: true });
-  }
-  if (!fs.existsSync(pactDir)) {
-    fs.mkdirSync(pactDir, { recursive: true });
-  }
-  const provider = new Pact({
-    consumer: 'PostsConsumer',
-    provider: 'PostsProvider',
-    port: 1234,
-    log: path.resolve(process.cwd(), 'logs', 'pact.log'),
-    dir: path.resolve(process.cwd(), '.pact'),
-    logLevel: 'warn'
-  });
-
-  beforeAll(() => provider.setup());
-  afterAll(() => provider.finalize());
-
-  test('GET /posts/1 conforms to contract', async () => {
-    await provider.addInteraction({
-      state: 'a post with id 1 exists',
-      uponReceiving: 'a request for post 1',
-      withRequest: {
-        method: 'GET',
-        path: '/posts/1'
-      },
-      willRespondWith: {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/json; charset=utf-8'
-        },
-        body: {
+describe('Posts API consumer contract', () => {
+  test('returns post 1 when it exists', async () => {
+    await pact
+      .addInteraction()
+      .given('a post with id 1 exists')
+      .uponReceiving('a request for post 1')
+      .withRequest('GET', '/posts/1')
+      .willRespondWith(200, (builder) => {
+        builder.headers({ 'Content-Type': 'application/json; charset=utf-8' });
+        builder.jsonBody({
           id: 1,
           userId: Matchers.integer(1),
           title: Matchers.like('Sample title'),
-          body: Matchers.like('Sample body text')
-        }
-      }
-    });
+          body: Matchers.like('Sample body text'),
+        });
+      })
+      .executeTest(async (mockServer) => {
+        const client = new JsonPlaceholderClient(mockServer.url);
+        const response = await client.getPost(1);
 
-    // Use IPv4 address explicitly to avoid issues with IPv6 localhost resolution
-    const response = await axios.get(`http://127.0.0.1:${provider.opts.port}/posts/1`);
-    expect(response.status).toBe(200);
-    expect(response.data.id).toBe(1);
-    await provider.verify();
+        expect(response.status).toBe(200);
+        expect(response.data.id).toBe(1);
+      });
   });
 });
