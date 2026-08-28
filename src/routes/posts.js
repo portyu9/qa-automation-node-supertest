@@ -1,42 +1,45 @@
 const express = require('express');
-const JsonPlaceholderClient = require('../clients/jsonPlaceholderClient');
 
-const router = express.Router();
+function positiveInteger(value) {
+  if (!/^\d+$/.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
 
-// Create a single instance of the client.  In a larger application you might
-// inject this via dependency injection or a service locator.
-const client = new JsonPlaceholderClient();
-
-/**
- * GET /posts
- *
- * Returns a list of all posts by proxying the request to the upstream API.  If
- * the upstream request fails, the error will be caught by the error handler
- * registered in app.js.
- */
-router.get('/', async (req, res, next) => {
-  try {
-    const { data } = await client.getPosts();
-    res.json(data);
-  } catch (err) {
-    next(err);
+function createPostsRouter({ client }) {
+  if (!client || typeof client.getPosts !== 'function' || typeof client.getPost !== 'function') {
+    throw new Error('posts client must implement getPosts() and getPost(id)');
   }
-});
 
-/**
- * GET /posts/:id
- *
- * Returns a single post.  Validates that the id is numeric before forwarding
- * to the upstream service.
- */
-router.get('/:id', async (req, res, next) => {
-  const id = req.params.id;
-  try {
-    const { data } = await client.getPost(id);
-    res.json(data);
-  } catch (err) {
-    next(err);
-  }
-});
+  const router = express.Router();
 
-module.exports = router;
+  router.get('/', async (req, res, next) => {
+    try {
+      const { data } = await client.getPosts();
+      res.json(data);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get('/:id', async (req, res, next) => {
+    const id = positiveInteger(req.params.id);
+    if (id === null) {
+      return res.status(400).json({
+        error: 'invalid_post_id',
+        requestId: req.requestId,
+      });
+    }
+
+    try {
+      const { data } = await client.getPost(id);
+      return res.json(data);
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  return router;
+}
+
+module.exports = { createPostsRouter, positiveInteger };
