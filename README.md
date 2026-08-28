@@ -39,8 +39,10 @@ A Node.js API automation framework using Supertest, Jest, Express, and Pact-styl
 Node.js 22+ is required.
 
 ```bash
-npm install
+npm ci
 ```
+
+`package-lock.json` is committed and CI uses `npm ci` so dependency resolution is reproducible. Use `npm install` only when intentionally changing dependencies, review the resulting lockfile diff, and commit the manifest and lockfile together.
 
 ## Commands
 
@@ -100,4 +102,4 @@ Jest collects branch/function/line/statement coverage with explicit minimums. Co
 
 GitHub Actions executes Node 22 and 24, runs syntax checks and coverage tests, and publishes coverage/Pact artifacts even when a test fails. Dependency updates for npm and Actions are managed by Dependabot.
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/TEST_STRATEGY.md`](docs/TEST_STRATEGY.md) for component boundaries and API-test governance.
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/TEST_STRATEGY.md`](docs/TEST_STRATEGY.md), and [`docs/DEPENDENCY_BOUNDARIES.md`](docs/DEPENDENCY_BOUNDARIES.md) for component boundaries, API-test governance, and upstream isolation policy.
