@@ -1,17 +1,12 @@
-# Lightweight Docker image for running the API and its tests
-FROM node:18-alpine
+FROM node:24-alpine
 
-# Set working directory
 WORKDIR /usr/src/app
 
-# Copy dependency manifests
-COPY package*.json ./
+COPY --chown=node:node package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
 
-# Install dependencies
-RUN npm install --only=production && npm cache clean --force
+COPY --chown=node:node . .
 
-# Copy source code
-COPY . .
+USER node
 
-# Default command runs tests; override with `-e CMD=start` to run the app
 CMD ["npm", "test"]
