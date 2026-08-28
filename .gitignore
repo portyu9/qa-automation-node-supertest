@@ -1,4 +1,9 @@
-node_modules
-coverage
-.pact
+node_modules/
+coverage/
+reports/
+pacts/
 .env
+*.log
+.DS_Store
+.idea/
+.vscode/

@@ -1,32 +1,31 @@
 {
   "name": "qa-api-supertest",
   "version": "1.0.0",
-  "description": "API testing framework using Express, SuperTest, Jest and Pact",
+  "private": true,
+  "description": "Node.js API test framework using Supertest, Jest, Express, and consumer contract verification.",
   "main": "src/server.js",
   "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "test": "jest --runInBand"
+    "test": "jest --runInBand",
+    "test:coverage": "jest --runInBand --coverage",
+    "test:contract": "jest src/contracts --runInBand",
+    "test:api": "jest src/tests --runInBand",
+    "check": "node --check src/app.js && node --check src/server.js && node --check src/config.js"
   },
-  "keywords": [
-    "api",
-    "testing",
-    "supertest",
-    "jest",
-    "pact",
-    "contract-testing"
-  ],
-  "author": "Yunior Portal",
   "license": "MIT",
   "dependencies": {
+    "@pact-foundation/pact": "^15.0.1",
     "axios": "^1.6.7",
     "express": "^4.18.2",
-    "@pact-foundation/pact": "^15.0.1",
-    "supertest": "^6.3.3"
+    "supertest": "^7.2.2"
   },
   "devDependencies": {
-    "jest": "^29.6.1",
+    "jest": "^29.7.0",
     "nodemon": "^3.0.1"
   }
 }

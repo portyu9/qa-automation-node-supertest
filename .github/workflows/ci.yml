@@ -1,25 +1,44 @@
-name: API Tests
+name: ci
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: node-supertest-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TEST_RUN_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22]
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: '18'
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Run tests
-        run: npm test
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm install --no-audit --no-fund
+      - run: npm run check
+      - run: npm run test:coverage
+      - name: Upload coverage and contract evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: supertest-node-${{ matrix.node }}-evidence
+          path: |
+            coverage/
+            pacts/
+          if-no-files-found: ignore
+          retention-days: 14
