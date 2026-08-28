@@ -1,32 +1,93 @@
-const request = require('supertest');
-const app = require('../app');
+const { createApp } = require('../app');
+const { apiAgent } = require('../testing/apiAgent');
 
-// Integration tests for the /posts API endpoints.  These tests use
-// SuperTest to send HTTP requests directly against the Express app without
-// binding to a network port.  The upstream JSONPlaceholder API is called
-// as part of the route handlers, so network access is required.
+function testApp(postsClient) {
+  return createApp({
+    postsClient,
+    config: {
+      upstreamBaseUrl: 'http://unused.invalid',
+      requestTimeoutMs: 1_000,
+    },
+  });
+}
 
-describe('/posts endpoints', () => {
-  jest.setTimeout(10000); // increase timeout for network I/O
+describe('/posts component boundary', () => {
+  test('GET /posts returns upstream data without opening a TCP listener', async () => {
+    const posts = [{ id: 1, userId: 7, title: 'title', body: 'body' }];
+    const postsClient = {
+      getPosts: jest.fn().mockResolvedValue({ data: posts }),
+      getPost: jest.fn(),
+    };
 
-  test('GET /posts returns an array of posts', async () => {
-    const res = await request(app).get('/posts');
-    expect(res.statusCode).toBe(200);
-    expect(Array.isArray(res.body)).toBe(true);
-    // verify the first element has expected keys
-    const post = res.body[0];
-    expect(post).toHaveProperty('id');
-    expect(post).toHaveProperty('userId');
-    expect(post).toHaveProperty('title');
+    const response = await apiAgent(testApp(postsClient), { runId: 'posts-list' })
+      .get('/posts')
+      .expect(200)
+      .expect('content-type', /json/);
+
+    expect(response.body).toEqual(posts);
+    expect(postsClient.getPosts).toHaveBeenCalledTimes(1);
+    expect(response.headers['x-request-id']).toBeTruthy();
   });
 
-  test('GET /posts/:id returns a specific post', async () => {
-    const id = 1;
-    const res = await request(app).get(`/posts/${id}`);
-    expect(res.statusCode).toBe(200);
-    expect(res.body).toHaveProperty('id', id);
-    expect(res.body).toHaveProperty('userId');
-    expect(res.body).toHaveProperty('title');
-    expect(res.body).toHaveProperty('body');
+  test('GET /posts/:id passes a validated numeric identifier to the client', async () => {
+    const post = { id: 1, userId: 7, title: 'title', body: 'body' };
+    const postsClient = {
+      getPosts: jest.fn(),
+      getPost: jest.fn().mockResolvedValue({ data: post }),
+    };
+
+    const response = await apiAgent(testApp(postsClient), { runId: 'posts-item' })
+      .get('/posts/1')
+      .expect(200);
+
+    expect(response.body).toEqual(post);
+    expect(postsClient.getPost).toHaveBeenCalledWith(1);
+  });
+
+  test.each(['/posts/0', '/posts/-1', '/posts/1.5', '/posts/not-a-number']) (
+    'GET %s rejects an invalid identifier before the upstream boundary',
+    async (path) => {
+      const postsClient = {
+        getPosts: jest.fn(),
+        getPost: jest.fn(),
+      };
+
+      const response = await apiAgent(testApp(postsClient), { runId: 'invalid-id' })
+        .get(path)
+        .expect(400);
+
+      expect(response.body).toEqual(
+        expect.objectContaining({
+          error: 'invalid_post_id',
+          requestId: expect.any(String),
+        })
+      );
+      expect(postsClient.getPost).not.toHaveBeenCalled();
+    }
+  );
+
+  test('upstream failures are mapped to the stable internal error envelope', async () => {
+    const postsClient = {
+      getPosts: jest.fn().mockRejectedValue(new Error('upstream unavailable')),
+      getPost: jest.fn(),
+    };
+    const log = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    const response = await apiAgent(testApp(postsClient), { runId: 'upstream-failure' })
+      .get('/posts')
+      .expect(500);
+
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        error: 'internal_server_error',
+        requestId: expect.any(String),
+      })
+    );
+    expect(log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: 'Error',
+        requestId: expect.any(String),
+      })
+    );
   });
 });
