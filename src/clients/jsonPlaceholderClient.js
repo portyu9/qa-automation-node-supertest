@@ -1,41 +1,35 @@
 const axios = require('axios');
 
+const DEFAULT_BASE_URL = 'https://jsonplaceholder.typicode.com';
+const DEFAULT_TIMEOUT_MS = 8_000;
+
 /**
- * JsonPlaceholderClient encapsulates calls to the JSONPlaceholder public API.
+ * HTTP client for the upstream posts service.
  *
- * Creating a dedicated client class makes it easy to swap the underlying
- * implementation (for example to use a different HTTP library), to inject
- * authentication headers, or to mock the calls in unit tests.  The default
- * base URL points at the free JSONPlaceholder service.
+ * Keeping transport concerns here lets route tests replace the dependency
+ * without network I/O while contract/integration tests exercise the real
+ * HTTP boundary intentionally.
  */
 class JsonPlaceholderClient {
   /**
-   * Construct a new client with an optional base URL.  Consumers can pass
-   * `baseURL` to override the default host (useful for testing against a
-   * different environment or when mocking with tools like WireMock).
-   *
-   * @param {string} baseURL - Base URL for the API (default: JSONPlaceholder)
+   * @param {string} baseURL absolute upstream base URL
+   * @param {{ timeoutMs?: number }} options transport options
    */
-  constructor(baseURL = 'https://jsonplaceholder.typicode.com') {
-    this.baseURL = baseURL;
-    this.client = axios.create({ baseURL });
+  constructor(baseURL = DEFAULT_BASE_URL, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+    if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) {
+      throw new Error('timeoutMs must be a positive integer');
+    }
+
+    this.client = axios.create({
+      baseURL,
+      timeout: timeoutMs,
+    });
   }
 
-  /**
-   * Fetch all posts.
-   *
-   * @returns {Promise<import('axios').AxiosResponse>} Axios response with array of posts
-   */
   async getPosts() {
     return this.client.get('/posts');
   }
 
-  /**
-   * Fetch a single post by its identifier.
-   *
-   * @param {number|string} id - Identifier of the post
-   * @returns {Promise<import('axios').AxiosResponse>} Axios response with the post
-   */
   async getPost(id) {
     return this.client.get(`/posts/${id}`);
   }
