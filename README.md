@@ -36,7 +36,7 @@ A Node.js API automation framework using Supertest, Jest, Express, and Pact-styl
 
 ## Installation
 
-Node.js 20+ is required.
+Node.js 22+ is required.
 
 ```bash
 npm install
@@ -98,6 +98,6 @@ Jest collects branch/function/line/statement coverage with explicit minimums. Co
 
 ## CI
 
-GitHub Actions executes Node 20 and 22, runs syntax checks and coverage tests, and publishes coverage/Pact artifacts even when a test fails. Dependency updates for npm and Actions are managed by Dependabot.
+GitHub Actions executes Node 22 and 24, runs syntax checks and coverage tests, and publishes coverage/Pact artifacts even when a test fails. Dependency updates for npm and Actions are managed by Dependabot.
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/TEST_STRATEGY.md`](docs/TEST_STRATEGY.md) for component boundaries and API-test governance.
