@@ -34,6 +34,34 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run check
       - run: npm run test:coverage
+      - name: Publish CI observability summary
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          NODE_VERSION: ${{ matrix.node }}
+        run: |
+          mkdir -p reports
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const nodeVersion = process.env.NODE_VERSION;
+          const payload = {
+            schemaVersion: 1,
+            framework: 'jest-supertest-pact',
+            runId: process.env.TEST_RUN_ID,
+            dimension: { node: nodeVersion },
+            status: process.env.JOB_STATUS,
+            sha: process.env.GITHUB_SHA,
+            ref: process.env.GITHUB_REF,
+          };
+          fs.writeFileSync(`reports/ci-observability-node-${nodeVersion}.json`, `${JSON.stringify(payload, null, 2)}\n`);
+          NODE
+          {
+            echo "### Supertest / Pact · Node ${{ matrix.node }}"
+            echo
+            echo "- Run ID: \`${TEST_RUN_ID}\`"
+            echo "- Job status: \`${JOB_STATUS}\`"
+            echo '- Evidence: Jest coverage + Pact artifacts + CI observability envelope'
+          } | tee "reports/ci-summary-node-${{ matrix.node }}.md" >> "$GITHUB_STEP_SUMMARY"
       - name: Upload coverage and contract evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -42,5 +70,6 @@ jobs:
           path: |
             coverage/
             pacts/
+            reports/
           if-no-files-found: ignore
           retention-days: 14
