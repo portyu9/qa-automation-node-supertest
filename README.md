@@ -4,6 +4,19 @@
 [![Extended](https://github.com/portyu9/qa-automation-node-supertest/actions/workflows/extended.yml/badge.svg)](https://github.com/portyu9/qa-automation-node-supertest/actions/workflows/extended.yml)
 [![Security](https://github.com/portyu9/qa-automation-node-supertest/actions/workflows/security.yml/badge.svg)](https://github.com/portyu9/qa-automation-node-supertest/actions/workflows/security.yml)
 
+[![Node.js](https://img.shields.io/badge/Node.js-22%20%7C%2024-339933)](https://nodejs.org/)
+[![JavaScript](https://img.shields.io/badge/JavaScript-ES2022-F7DF1E)](https://developer.mozilla.org/docs/Web/JavaScript)
+[![Express](https://img.shields.io/badge/Express-5.2-6E7781)](https://expressjs.com/)
+[![Supertest](https://img.shields.io/badge/Supertest-7.2-6E7781)](https://github.com/ladjs/supertest)
+[![Jest](https://img.shields.io/badge/Jest-30.4-C21325)](https://jestjs.io/)
+[![Axios](https://img.shields.io/badge/Axios-1.x-5A29E4)](https://axios-http.com/)
+[![Pact](https://img.shields.io/badge/Pact-17.x-F6A51C)](https://docs.pact.io/)
+[![Docker](https://img.shields.io/badge/Docker-runtime-2496ED)](https://www.docker.com/)
+[![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-CI-2088FF)](https://github.com/features/actions)
+[![Trivy](https://img.shields.io/badge/Trivy-security%20scan-1904DA)](https://trivy.dev/)
+[![License](https://img.shields.io/badge/License-MIT-2EA44F)](LICENSE)
+[![Security Policy](https://img.shields.io/badge/Security-Policy-6E7781)](.github/SECURITY.md)
+
 A deterministic API quality-engineering framework built with **Express 5**, **Supertest**, **Jest**, **Axios**, and **Pact**. The fast layer exercises the Express application in-process, external transport is isolated behind a client boundary, dependency failures are normalized into stable public semantics, and an extended local-listener contract validates the real TCP/middleware/serialization path without introducing public-network nondeterminism.
 
 > [!IMPORTANT]
