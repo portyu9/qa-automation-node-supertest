@@ -4,18 +4,16 @@
 [![Extended](https://github.com/portyu9/qa-automation-node-supertest/actions/workflows/extended.yml/badge.svg)](https://github.com/portyu9/qa-automation-node-supertest/actions/workflows/extended.yml)
 [![Security](https://github.com/portyu9/qa-automation-node-supertest/actions/workflows/security.yml/badge.svg)](https://github.com/portyu9/qa-automation-node-supertest/actions/workflows/security.yml)
 
-[![Node.js](https://img.shields.io/badge/Node.js-22%20%7C%2024-339933)](https://nodejs.org/)
-[![JavaScript](https://img.shields.io/badge/JavaScript-ES2022-F7DF1E)](https://developer.mozilla.org/docs/Web/JavaScript)
-[![Express](https://img.shields.io/badge/Express-5.2-6E7781)](https://expressjs.com/)
-[![Supertest](https://img.shields.io/badge/Supertest-7.2-6E7781)](https://github.com/ladjs/supertest)
-[![Jest](https://img.shields.io/badge/Jest-30.4-C21325)](https://jestjs.io/)
-[![Axios](https://img.shields.io/badge/Axios-1.x-5A29E4)](https://axios-http.com/)
-[![Pact](https://img.shields.io/badge/Pact-17.x-F6A51C)](https://docs.pact.io/)
-[![Docker](https://img.shields.io/badge/Docker-runtime-2496ED)](https://www.docker.com/)
-[![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-CI-2088FF)](https://github.com/features/actions)
-[![Trivy](https://img.shields.io/badge/Trivy-security%20scan-1904DA)](https://trivy.dev/)
-[![License](https://img.shields.io/badge/License-MIT-2EA44F)](LICENSE)
-[![Security Policy](https://img.shields.io/badge/Security-Policy-6E7781)](.github/SECURITY.md)
+[![Node.js](https://img.shields.io/badge/Node.js-runtime-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
+[![JavaScript](https://img.shields.io/badge/JavaScript-language-F7DF1E?logo=javascript&logoColor=black)](https://developer.mozilla.org/docs/Web/JavaScript)
+[![Express](https://img.shields.io/badge/Express-application-000000?logo=express&logoColor=white)](https://expressjs.com/)
+[![Supertest](https://img.shields.io/badge/Supertest-API%20testing-6E7781)](https://github.com/ladjs/supertest)
+[![Jest](https://img.shields.io/badge/Jest-testing-C21325?logo=jest&logoColor=white)](https://jestjs.io/)
+[![Pact](https://img.shields.io/badge/Pact-contracts-F6A51C)](https://docs.pact.io/)
+[![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-CI-2088FF?logo=githubactions&logoColor=white)](https://github.com/features/actions)
+[![Trivy](https://img.shields.io/badge/Trivy-security-1904DA?logo=trivy&logoColor=white)](https://trivy.dev/)
+[![License](https://img.shields.io/badge/License-MIT-2EA44F?logo=opensourceinitiative&logoColor=white)](LICENSE)
+[![Security Policy](https://img.shields.io/badge/Security-Policy-6E7781?logo=github&logoColor=white)](.github/SECURITY.md)
 
 A deterministic API quality-engineering framework built with **Express 5**, **Supertest**, **Jest**, **Axios**, and **Pact**. The fast layer exercises the Express application in-process, external transport is isolated behind a client boundary, dependency failures are normalized into stable public semantics, and an extended local-listener contract validates the real TCP/middleware/serialization path without introducing public-network nondeterminism.
 
@@ -44,6 +42,14 @@ flowchart LR
     LISTENER[Extended local TCP smoke] --> APP
     LISTENER -. deterministic client .-> PORT
     APP --> ENVELOPE[Stable API error contract]
+
+    classDef entry fill:#ddf4ff,stroke:#0969da,color:#24292f,stroke-width:1.5px;
+    classDef core fill:#f6f8fa,stroke:#57606a,color:#24292f,stroke-width:1.5px;
+    classDef evidence fill:#dafbe1,stroke:#1a7f37,color:#24292f,stroke-width:1.5px;
+    class TEST,CONTRACT,LISTENER entry;
+    class APP,ROUTE,PORT,AXIOS,ERR,PROVIDER core;
+    class ENVELOPE evidence;
+    linkStyle default stroke:#57606a,stroke-width:1.4px;
 ```
 
 ## Engineering invariants
@@ -153,6 +159,12 @@ flowchart TD
     L[Extended listener] -->|127.0.0.1 ephemeral port| TCP[Node HTTP stack]
     L -. injected deterministic client .-> E
     LIVE[Optional external integration] --> EXT[Real dependency]
+
+    classDef entry fill:#ddf4ff,stroke:#0969da,color:#24292f,stroke-width:1.5px;
+    classDef core fill:#f6f8fa,stroke:#57606a,color:#24292f,stroke-width:1.5px;
+    class C,V,T,P,L,LIVE entry;
+    class E,PURE,HTTP,CONTRACT,TCP,EXT core;
+    linkStyle default stroke:#57606a,stroke-width:1.4px;
 ```
 
 A test should use the cheapest boundary that proves the requirement. Do not promote a deterministic component case to a live-network test merely to make it look more end-to-end.
@@ -261,6 +273,18 @@ flowchart TD
     N24 --> EV
     L22 --> EV
     L24 --> EV
+
+    classDef entry fill:#ddf4ff,stroke:#0969da,color:#24292f,stroke-width:1.5px;
+    classDef core fill:#f6f8fa,stroke:#57606a,color:#24292f,stroke-width:1.5px;
+    classDef gate fill:#fbefff,stroke:#8250df,color:#24292f,stroke-width:1.5px;
+    classDef evidence fill:#dafbe1,stroke:#1a7f37,color:#24292f,stroke-width:1.5px;
+    classDef security fill:#ffebe9,stroke:#cf222e,color:#24292f,stroke-width:1.5px;
+    class PR,APICHANGE entry;
+    class N22,N24 core;
+    class EXT,L22,L24 gate;
+    class SEC security;
+    class EV evidence;
+    linkStyle default stroke:#57606a,stroke-width:1.4px;
 ```
 
 ## Failure triage
