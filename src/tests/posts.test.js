@@ -1,4 +1,5 @@
 const { createApp } = require('../app');
+const { UpstreamServiceError } = require('../clients/upstreamError');
 const { apiAgent } = require('../testing/apiAgent');
 
 function testApp(postsClient) {
@@ -44,7 +45,7 @@ describe('/posts component boundary', () => {
     expect(postsClient.getPost).toHaveBeenCalledWith(1);
   });
 
-  test.each(['/posts/0', '/posts/-1', '/posts/1.5', '/posts/not-a-number']) (
+  test.each(['/posts/0', '/posts/-1', '/posts/1.5', '/posts/not-a-number'])(
     'GET %s rejects an invalid identifier before the upstream boundary',
     async (path) => {
       const postsClient = {
@@ -66,28 +67,50 @@ describe('/posts component boundary', () => {
     }
   );
 
-  test('upstream failures are mapped to the stable internal error envelope', async () => {
+  test.each([
+    ['upstream_timeout', 504],
+    ['upstream_unavailable', 502],
+  ])('maps %s to a stable dependency error envelope', async (code, statusCode) => {
     const postsClient = {
-      getPosts: jest.fn().mockRejectedValue(new Error('upstream unavailable')),
+      getPosts: jest.fn().mockRejectedValue(new UpstreamServiceError(code, statusCode)),
       getPost: jest.fn(),
     };
     const log = jest.spyOn(console, 'error').mockImplementation(() => {});
 
-    const response = await apiAgent(testApp(postsClient), { runId: 'upstream-failure' })
+    const response = await apiAgent(testApp(postsClient), { runId: code })
+      .get('/posts')
+      .expect(statusCode);
+
+    expect(response.body).toEqual({
+      error: code,
+      requestId: expect.any(String),
+    });
+    expect(log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code,
+        statusCode,
+        requestId: expect.any(String),
+      })
+    );
+
+    log.mockRestore();
+  });
+
+  test('unexpected application failures remain internal server errors', async () => {
+    const postsClient = {
+      getPosts: jest.fn().mockRejectedValue(new Error('unexpected failure')),
+      getPost: jest.fn(),
+    };
+    const log = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    const response = await apiAgent(testApp(postsClient), { runId: 'internal-error' })
       .get('/posts')
       .expect(500);
 
-    expect(response.body).toEqual(
-      expect.objectContaining({
-        error: 'internal_server_error',
-        requestId: expect.any(String),
-      })
-    );
-    expect(log).toHaveBeenCalledWith(
-      expect.objectContaining({
-        error: 'Error',
-        requestId: expect.any(String),
-      })
-    );
+    expect(response.body).toEqual({
+      error: 'internal_server_error',
+      requestId: expect.any(String),
+    });
+    log.mockRestore();
   });
 });

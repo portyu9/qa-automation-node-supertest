@@ -40,4 +40,23 @@ describe('JsonPlaceholderClient transport contract', () => {
       expect(axios.create).not.toHaveBeenCalled();
     }
   );
+
+  test.each([
+    ['ECONNABORTED', 'upstream_timeout', 504],
+    ['ETIMEDOUT', 'upstream_timeout', 504],
+    ['ECONNRESET', 'upstream_unavailable', 502],
+  ])('normalizes %s transport failures to %s', async (transportCode, publicCode, statusCode) => {
+    const transport = {
+      get: jest.fn().mockRejectedValue(Object.assign(new Error('transport failure'), { code: transportCode })),
+    };
+    axios.create.mockReturnValue(transport);
+
+    const client = new JsonPlaceholderClient('https://api.example.test');
+
+    await expect(client.getPosts()).rejects.toMatchObject({
+      name: 'UpstreamServiceError',
+      publicCode,
+      statusCode,
+    });
+  });
 });

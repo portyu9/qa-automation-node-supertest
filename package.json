@@ -15,7 +15,7 @@
     "test:coverage": "jest --runInBand --coverage",
     "test:contract": "jest src/contracts --runInBand",
     "test:api": "jest src/tests --runInBand",
-    "check": "node --check src/app.js && node --check src/server.js && node --check src/config.js"
+    "check": "node --check src/app.js && node --check src/server.js && node --check src/config.js && node --check src/clients/jsonPlaceholderClient.js && node --check src/clients/upstreamError.js && node --check src/routes/posts.js && node --check src/testing/apiAgent.js"
   },
   "license": "MIT",
   "dependencies": {
