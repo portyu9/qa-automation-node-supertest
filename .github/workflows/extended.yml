@@ -1,0 +1,65 @@
+name: extended
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "src/**"
+      - "scripts/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/extended.yml"
+  schedule:
+    - cron: "5 8 * * 3"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supertest-extended-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  listener-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    env:
+      TEST_RUN_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}-node${{ matrix.node }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run check
+      - name: Exercise real local TCP listener with deterministic dependency
+        run: npm run test:live-smoke
+      - name: Publish listener observability summary
+        if: always()
+        run: |
+          mkdir -p reports
+          {
+            echo "### Supertest / Express listener contract · Node ${{ matrix.node }}"
+            echo
+            echo "- Run ID: \`${TEST_RUN_ID}\`"
+            echo "- Transport: \`127.0.0.1\` ephemeral TCP listener"
+            echo "- Upstream: injected deterministic client (no external network)"
+            echo "- Job status: \`${{ job.status }}\`"
+            echo "- Coverage intent: listener + middleware + correlation + routing + serialization"
+          } | tee "reports/listener-node-${{ matrix.node }}.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload extended evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: supertest-listener-node-${{ matrix.node }}-evidence
+          path: reports/
+          if-no-files-found: ignore
+          retention-days: 14
