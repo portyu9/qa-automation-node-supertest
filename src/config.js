@@ -23,6 +23,12 @@ function absoluteHttpUrl(name, fallback) {
   if (!['http:', 'https:'].includes(parsed.protocol)) {
     throw new Error(`${name} must use http or https`);
   }
+  if (parsed.username || parsed.password) {
+    throw new Error(`${name} must not contain URL credentials`);
+  }
+  if (parsed.search || parsed.hash) {
+    throw new Error(`${name} must not contain a query string or fragment`);
+  }
   return raw.replace(/\/$/, '');
 }
 
