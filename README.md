@@ -16,17 +16,17 @@
 [![License](https://img.shields.io/badge/License-MIT-2EA44F?logo=opensourceinitiative&logoColor=white)](LICENSE)
 [![Security Policy](https://img.shields.io/badge/Security-Policy-24292F?logo=github&logoColor=white)](.github/SECURITY.md)
 
-A deterministic API quality-engineering framework built with **Express 5**, **Supertest**, **Jest**, **Axios**, and **Pact**. The fast layer exercises the Express application in-process, external transport is isolated behind a client boundary, dependency failures are normalized into stable public semantics, and an extended local-listener contract validates the real TCP/middleware/serialization path without introducing public-network nondeterminism.
+A deterministic API quality-engineering framework built with **Express 5**, **Supertest**, **Jest**, **Axios**, and **Pact**. The fast layer exercises the Express application in-process, external transport is isolated behind a provider-neutral client boundary, dependency failures are normalized into stable public semantics, and an extended local-listener contract validates the real TCP/middleware/serialization path without introducing public-network nondeterminism.
 
 > [!IMPORTANT]
-> The framework separates **application behavior**, **transport behavior**, **consumer compatibility**, **listener/runtime behavior**, and **documentation governance**. Those are distinct failure domains and should stay distinct in both test design and triage.
+> The framework separates **application behavior**, **transport behavior**, **consumer compatibility**, **listener/runtime behavior**, and **documentation governance**. Runtime dependency ownership is explicit: normal tests inject deterministic clients, while `src/server.js` requires an approved `UPSTREAM_BASE_URL` before binding a listener.
 
 ## Capability map
 
 | Validation plane | What it proves | Network model | Evidence |
 | --- | --- | --- | --- |
 | Component | Express routing, validation, middleware, stable error envelopes | In-process Supertest | Jest assertions + coverage |
-| Transport | Axios configuration and failure normalization | Mocked client factory | Jest assertions |
+| Transport | Explicit Axios target/timeout policy and failure normalization | Mocked client factory | Jest assertions |
 | Contract | Consumer/provider HTTP expectations | Pact mock provider | Pact artifacts |
 | Extended listener | Real Node TCP listener + serialization/correlation | `127.0.0.1:0`, injected deterministic dependency | Local smoke summary |
 | Security | Dependency/configuration exposure | Filesystem analysis | Trivy JSON + Markdown summary |
@@ -38,19 +38,21 @@ flowchart LR
     TEST[Jest / Supertest] --> APP[createApp]
     APP --> ROUTE[posts router]
     ROUTE --> PORT[posts client boundary]
-    PORT --> AXIOS[JsonPlaceholderClient / Axios]
+    PORT --> AXIOS[PostsUpstreamClient / Axios]
     PORT --> ERR[Upstream error normalization]
     CONTRACT[Pact] --> PROVIDER[Pact mock provider]
     LISTENER[Extended local TCP smoke] --> APP
     LISTENER -. deterministic client .-> PORT
+    SERVER[src/server.js] --> CFG[loadConfig]
+    CFG --> PORT
     APP --> ENVELOPE[Stable API error contract]
     DOCS[README contract] --> GOVERN[Repository governance]
 
     classDef entry fill:#ddf4ff,stroke:#0969da,color:#24292f,stroke-width:1.5px;
     classDef core fill:#f6f8fa,stroke:#57606a,color:#24292f,stroke-width:1.5px;
     classDef evidence fill:#dafbe1,stroke:#1a7f37,color:#24292f,stroke-width:1.5px;
-    class TEST,CONTRACT,LISTENER,DOCS entry;
-    class APP,ROUTE,PORT,AXIOS,ERR,PROVIDER core;
+    class TEST,CONTRACT,LISTENER,SERVER,DOCS entry;
+    class APP,ROUTE,PORT,AXIOS,ERR,PROVIDER,CFG core;
     class ENVELOPE,GOVERN evidence;
     linkStyle default stroke:#57606a,stroke-width:1.4px;
 ```
@@ -59,9 +61,10 @@ flowchart LR
 
 | Concern | Framework contract |
 | --- | --- |
-| Fast API tests | Import `createApp()` and use Supertest directly; no listener process is required. |
+| Fast API tests | Call `createApp({ postsClient })` and use Supertest directly; no listener or external target is required. |
 | Dependency isolation | Routes consume a narrow injected client, not Axios directly. |
-| Transport policy | Base URL and timeout exist in one concrete client boundary. |
+| Runtime target | `UPSTREAM_BASE_URL` is required at real server startup; no public-provider fallback exists. |
+| Transport policy | An explicitly supplied, validated HTTP(S) base URL and timeout exist in one provider-neutral concrete client boundary. |
 | Failure taxonomy | Timeout → `504/upstream_timeout`; other transport outage/reset → `502/upstream_unavailable`. |
 | Application faults | Unknown defects remain `500/internal_server_error`. |
 | Input validation | Invalid identifiers fail before the dependency boundary is called. |
@@ -78,7 +81,7 @@ flowchart LR
 | Express | Routing, middleware execution, request/response lifecycle, listener integration | Application composition, validation middleware, stable public error envelope, dependency injection | Express request/response semantics and middleware ordering |
 | Supertest | In-process HTTP-style requests against the Express application | Fast component boundary and run-scoped request-agent correlation | Native fluent assertions and application-without-listener execution |
 | Jest | Test lifecycle, assertions, mocks, coverage collection | Component/transport/framework grouping and deterministic doubles | Jest assertion/stack and mock semantics |
-| Axios | Concrete upstream transport, timeout/error objects | One client boundary, validated base URL/timeout, transport error normalization | Axios-specific errors terminate at the client boundary rather than leaking into public API semantics |
+| Axios | Concrete upstream transport, timeout/error objects | Explicit target validation, one provider-neutral client boundary, transport error normalization | Axios-specific errors terminate at the client boundary rather than leaking into public API semantics |
 | Pact | Consumer interaction recording and mock-provider verification | Compatibility plane separate from component behavior | Pact interaction failures remain compatibility evidence, not component failures |
 | Node HTTP / `fetch` | Real listener/socket/serialization behavior | Loopback-only extended smoke with injected deterministic dependency | TCP/listener failures remain runtime signals rather than upstream availability noise |
 | Trivy | Filesystem vulnerability and supported misconfiguration analysis | HIGH/CRITICAL remediation-oriented gate and retained findings | Configured `vuln,misconfig` scan is not generic credential/secret scanning |
@@ -93,6 +96,8 @@ flowchart LR
 │   ├── server.js
 │   ├── config.js
 │   ├── clients/
+│   │   ├── postsUpstreamClient.js
+│   │   └── upstreamError.js
 │   ├── contracts/
 │   ├── middleware/
 │   ├── routes/
@@ -140,14 +145,16 @@ Exercise the deterministic real-listener boundary:
 npm run test:live-smoke
 ```
 
-Start the application with its configured concrete dependency only when a real external-listener execution is intentionally required:
+Start the application only when a real upstream dependency has been explicitly approved and configured:
 
 ```bash
-npm start
+UPSTREAM_BASE_URL=https://api.test.example.internal npm start
 ```
 
+`src/server.js` validates the target before binding. Missing, non-HTTP(S), credential-bearing, query-bearing, or fragment-bearing upstream URLs fail closed as configuration errors.
+
 > [!NOTE]
-> The ordinary Supertest suite should not start `src/server.js`. A real listener is more expensive and adds socket lifecycle concerns; those concerns are tested explicitly by the separate local listener contract.
+> The ordinary Supertest suite should not start `src/server.js`. A real listener is more expensive and adds socket lifecycle concerns; those concerns are tested explicitly by the separate local listener contract. Component tests inject their dependency directly and therefore do not require `UPSTREAM_BASE_URL`.
 
 <details>
 <summary><strong>Command reference</strong></summary>
@@ -160,7 +167,7 @@ npm start
 | `npm run test:contract` | Pact consumer contract tests. |
 | `npm run test:coverage` | Full Jest suite with coverage thresholds. |
 | `npm run test:live-smoke` | Real loopback TCP listener with deterministic injected client. |
-| `npm start` | Intentional service listener using runtime configuration. |
+| `npm start` | Intentional service listener; requires explicit `UPSTREAM_BASE_URL`. |
 
 </details>
 
@@ -169,11 +176,11 @@ npm start
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `PORT` | Listener port for `src/server.js` | `3000` |
-| `UPSTREAM_BASE_URL` | Concrete posts dependency | JSONPlaceholder |
+| `UPSTREAM_BASE_URL` | Approved posts dependency base URL | required |
 | `REQUEST_TIMEOUT_MS` | Axios upstream timeout | `8000` |
 | `TEST_RUN_ID` | Test/request correlation prefix | generated UUID |
 
-Configuration is validated before listener startup. Invalid ports, unsafe URLs, and invalid timeout budgets are framework errors, not request-retry candidates.
+Configuration is validated before listener startup. `loadConfig(env)` accepts an injected read-only environment map for framework contracts and defaults to `process.env` only at the real runtime edge. Invalid ports, missing/unsafe URLs, and invalid timeout budgets are framework errors, not request-retry candidates.
 
 ## Boundary topology
 
@@ -185,12 +192,13 @@ flowchart TD
     P[Pact] --> CONTRACT[Consumer compatibility]
     L[Extended listener] -->|127.0.0.1 ephemeral port| TCP[Node HTTP stack]
     L -. injected deterministic client .-> E
-    LIVE[Optional external integration] --> EXT[Real dependency]
+    LIVE[Optional external integration] --> CFG[Explicit target configuration]
+    CFG --> EXT[Real dependency]
 
     classDef entry fill:#ddf4ff,stroke:#0969da,color:#24292f,stroke-width:1.5px;
     classDef core fill:#f6f8fa,stroke:#57606a,color:#24292f,stroke-width:1.5px;
     class C,V,T,P,L,LIVE entry;
-    class E,PURE,HTTP,CONTRACT,TCP,EXT core;
+    class E,PURE,HTTP,CONTRACT,TCP,CFG,EXT core;
     linkStyle default stroke:#57606a,stroke-width:1.4px;
 ```
 
@@ -235,13 +243,13 @@ Correlation identifies **which request** failed. It is bounded metadata, not a c
 5. verifies HTTP serialization and request-ID propagation;
 6. closes the listener deterministically.
 
-No public DNS, TLS, or upstream service is involved. This isolates Node listener/middleware/runtime regressions from dependency availability.
+No public DNS, TLS, runtime target configuration, or upstream service is involved. This isolates Node listener/middleware/runtime regressions from dependency availability.
 
 ## Contract testing
 
 Pact remains a separate responsibility. Component tests prove how this application behaves with a client contract. Pact proves the consumer interaction expected from an independently deployable provider.
 
-A Pact failure should be handled as compatibility drift—not concealed by weakening a component assertion.
+The Pact suite uses the same provider-neutral `PostsUpstreamClient` against Pact's local generated provider. A Pact failure should be handled as compatibility drift—not concealed by weakening a component assertion or by relying on public service availability.
 
 ## Logging and diagnostic policy
 
@@ -320,6 +328,7 @@ flowchart TD
 
 | Signal | First interpretation | Correct first move |
 | --- | --- | --- |
+| Missing/unsafe `UPSTREAM_BASE_URL` | Runtime configuration/ownership | Configure an approved explicit target before starting the server |
 | 400 contract failure | Input validation | Verify route parser and ensure dependency was not called |
 | 502 | Dependency availability | Inspect concrete transport/connectivity |
 | 504 | Dependency latency | Inspect timeout/latency; do not blindly increase timeout |
@@ -337,12 +346,13 @@ flowchart TD
 When adding a dependency:
 
 1. define a narrow interface consumed by route/service code;
-2. centralize concrete transport policy;
-3. normalize library-specific errors at the client boundary;
-4. inject deterministic doubles in component tests;
-5. add transport tests for timeout/base URL/error mapping;
-6. add Pact where independent deployment compatibility matters;
-7. reserve live external testing for an explicit integration layer.
+2. require explicit runtime target ownership;
+3. centralize concrete transport policy in a provider-neutral client;
+4. normalize library-specific errors at the client boundary;
+5. inject deterministic doubles in component tests;
+6. add transport tests for target validation, timeout, resource mapping, and error normalization;
+7. add Pact where independent deployment compatibility matters;
+8. reserve live external testing for an explicit integration layer.
 
 When adding endpoints:
 
@@ -358,6 +368,8 @@ When adding endpoints:
 
 - starting an HTTP listener for every Supertest test;
 - public-network calls in component tests;
+- silent public-provider defaults in runtime configuration or client constructors;
+- provider identity encoded into reusable client names;
 - mocking Axios from route tests instead of replacing the client boundary;
 - blindly retrying mutating requests;
 - reflecting arbitrary caller-controlled correlation text;
