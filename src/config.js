@@ -1,6 +1,6 @@
 'use strict';
 
-const { randomUUID } = require('node:crypto');
+const { correlationToken } = require('./correlation');
 
 function positiveInteger(name, fallback, env) {
   const raw = env[name];
@@ -13,7 +13,7 @@ function positiveInteger(name, fallback, env) {
 }
 
 function requiredAbsoluteHttpUrl(name, env) {
-  const raw = (env[name] || '').trim();
+  const raw = String(env[name] || '').trim();
   if (!raw) {
     throw new Error(`${name} is required`);
   }
@@ -24,8 +24,8 @@ function requiredAbsoluteHttpUrl(name, env) {
   } catch {
     throw new Error(`${name} must be an absolute URL`);
   }
-  if (!['http:', 'https:'].includes(parsed.protocol)) {
-    throw new Error(`${name} must use http or https`);
+  if (!['http:', 'https:'].includes(parsed.protocol) || !parsed.hostname) {
+    throw new Error(`${name} must use http or https with a hostname`);
   }
   if (parsed.username || parsed.password) {
     throw new Error(`${name} must not contain URL credentials`);
@@ -41,7 +41,7 @@ function loadConfig(env = process.env) {
     port: positiveInteger('PORT', 3000, env),
     upstreamBaseUrl: requiredAbsoluteHttpUrl('UPSTREAM_BASE_URL', env),
     requestTimeoutMs: positiveInteger('REQUEST_TIMEOUT_MS', 8_000, env),
-    runId: (env.TEST_RUN_ID || '').trim() || randomUUID(),
+    runId: correlationToken('TEST_RUN_ID', env.TEST_RUN_ID),
   });
 }
 
