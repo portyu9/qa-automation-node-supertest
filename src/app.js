@@ -1,15 +1,18 @@
 const express = require('express');
-const JsonPlaceholderClient = require('./clients/jsonPlaceholderClient');
+const PostsUpstreamClient = require('./clients/postsUpstreamClient');
 const { UpstreamServiceError } = require('./clients/upstreamError');
 const { loadConfig } = require('./config');
 const { requestContext } = require('./middleware/requestContext');
 const { createPostsRouter } = require('./routes/posts');
 
 function createApp({ postsClient, config } = {}) {
-  const runtimeConfig = config || loadConfig();
-  const client = postsClient || new JsonPlaceholderClient(runtimeConfig.upstreamBaseUrl, {
-    timeoutMs: runtimeConfig.requestTimeoutMs,
-  });
+  let client = postsClient;
+  if (!client) {
+    const runtimeConfig = config || loadConfig();
+    client = new PostsUpstreamClient(runtimeConfig.upstreamBaseUrl, {
+      timeoutMs: runtimeConfig.requestTimeoutMs,
+    });
+  }
 
   const app = express();
   app.disable('x-powered-by');
@@ -39,6 +42,4 @@ function createApp({ postsClient, config } = {}) {
   return app;
 }
 
-const app = createApp();
-module.exports = app;
-module.exports.createApp = createApp;
+module.exports = { createApp };
