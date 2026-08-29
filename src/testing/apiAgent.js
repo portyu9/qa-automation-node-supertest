@@ -2,16 +2,20 @@
 
 const request = require('supertest');
 const { randomUUID } = require('node:crypto');
+const { correlationToken } = require('../correlation');
 
-function apiAgent(app, { runId = process.env.TEST_RUN_ID || randomUUID() } = {}) {
+function apiAgent(app, { runId = process.env.TEST_RUN_ID } = {}) {
   const agent = request.agent(app);
+  const resolvedRunId = correlationToken('runId', runId);
 
   function issue(method, path) {
-    const verb = String(method).toLowerCase();
+    const verb = String(method).trim().toLowerCase();
     if (typeof agent[verb] !== 'function') {
       throw new TypeError(`unsupported HTTP method: ${method}`);
     }
-    return agent[verb](path).set('x-request-id', `${runId}-${randomUUID()}`);
+    return agent[verb](path)
+      .set('x-test-run-id', resolvedRunId)
+      .set('x-request-id', randomUUID());
   }
 
   return Object.freeze({
