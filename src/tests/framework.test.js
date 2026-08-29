@@ -1,7 +1,14 @@
 const request = require('supertest');
-const app = require('../app');
+const { createApp } = require('../app');
 const { loadConfig } = require('../config');
 const { apiAgent } = require('../testing/apiAgent');
+
+const app = createApp({
+  postsClient: {
+    getPosts: jest.fn(),
+    getPost: jest.fn(),
+  },
+});
 
 describe('framework contracts', () => {
   test('health endpoint propagates a request correlation id', async () => {
@@ -49,6 +56,27 @@ describe('framework contracts', () => {
     );
   });
 
+  test('runtime configuration requires an explicit upstream target', () => {
+    expect(() => loadConfig({})).toThrow('UPSTREAM_BASE_URL is required');
+  });
+
+  test('runtime configuration is parsed from an injected read-only environment', () => {
+    const config = loadConfig({
+      PORT: '4100',
+      UPSTREAM_BASE_URL: 'https://api.example.test/v1/',
+      REQUEST_TIMEOUT_MS: '2500',
+      TEST_RUN_ID: 'config-contract',
+    });
+
+    expect(config).toEqual({
+      port: 4100,
+      upstreamBaseUrl: 'https://api.example.test/v1',
+      requestTimeoutMs: 2500,
+      runId: 'config-contract',
+    });
+    expect(Object.isFrozen(config)).toBe(true);
+  });
+
   test.each([
     ['REQUEST_TIMEOUT_MS', '0'],
     ['UPSTREAM_BASE_URL', 'localhost:8080'],
@@ -56,13 +84,11 @@ describe('framework contracts', () => {
     ['UPSTREAM_BASE_URL', 'https://example.test/api?access_token=secret'],
     ['UPSTREAM_BASE_URL', 'https://example.test/api#fragment'],
   ])('invalid %s configuration fails before server startup', (name, value) => {
-    const original = process.env[name];
-    try {
-      process.env[name] = value;
-      expect(() => loadConfig()).toThrow(name);
-    } finally {
-      if (original === undefined) delete process.env[name];
-      else process.env[name] = original;
-    }
+    expect(() =>
+      loadConfig({
+        UPSTREAM_BASE_URL: 'https://api.example.test',
+        [name]: value,
+      })
+    ).toThrow(name);
   });
 });
