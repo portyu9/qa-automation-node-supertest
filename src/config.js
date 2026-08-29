@@ -12,6 +12,14 @@ function positiveInteger(name, fallback, env) {
   return value;
 }
 
+function tcpPort(name, fallback, env) {
+  const value = positiveInteger(name, fallback, env);
+  if (value > 65_535) {
+    throw new Error(`${name} must be between 1 and 65535`);
+  }
+  return value;
+}
+
 function requiredAbsoluteHttpUrl(name, env) {
   const raw = String(env[name] || '').trim();
   if (!raw) {
@@ -38,7 +46,7 @@ function requiredAbsoluteHttpUrl(name, env) {
 
 function loadConfig(env = process.env) {
   return Object.freeze({
-    port: positiveInteger('PORT', 3000, env),
+    port: tcpPort('PORT', 3000, env),
     upstreamBaseUrl: requiredAbsoluteHttpUrl('UPSTREAM_BASE_URL', env),
     requestTimeoutMs: positiveInteger('REQUEST_TIMEOUT_MS', 8_000, env),
     runId: correlationToken('TEST_RUN_ID', env.TEST_RUN_ID),
