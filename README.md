@@ -16,22 +16,26 @@
 [![License](https://img.shields.io/badge/License-MIT-2EA44F?logo=opensourceinitiative&logoColor=white)](LICENSE)
 [![Security Policy](https://img.shields.io/badge/Security-Policy-24292F?logo=github&logoColor=white)](.github/SECURITY.md)
 
-A deterministic API quality-engineering framework built with **Express 5**, **Supertest**, **Jest**, **Axios**, and **Pact**. The fast layer exercises the Express application in-process, external transport is isolated behind a provider-neutral client boundary, dependency failures are normalized into stable public semantics, and an extended local-listener contract validates the real TCP/middleware/serialization path without introducing public-network nondeterminism.
+A deterministic API quality-engineering framework built with **Express 5, Supertest, Jest, Axios, and Pact**. Fast component tests execute the real Express application in-process; external transport is isolated behind a provider-neutral client; Pact owns consumer compatibility; and a separate loopback listener contract verifies real TCP/middleware/serialization behavior without public-network nondeterminism.
 
 > [!IMPORTANT]
-> The framework separates **application behavior**, **transport behavior**, **consumer compatibility**, **listener/runtime behavior**, and **documentation governance**. Runtime dependency ownership is explicit: normal tests inject deterministic clients, while `src/server.js` requires an approved `UPSTREAM_BASE_URL` before binding a listener.
+> Application behavior, transport behavior, contract compatibility, listener behavior, and deployed-environment behavior are different failure domains. The framework keeps those boundaries separate so a failing test answers **what broke** before it asks **where the stack trace ended**.
+
+**Read by intent:** [capabilities](#capability-map) · [architecture](#architecture) · [quick start](#quick-start) · [failure taxonomy](#stable-public-failure-taxonomy) · [correlation](#request-correlation) · [dependencies](#dependency-maintenance) · [triage](#failure-triage)
 
 ## Capability map
 
-| Validation plane | What it proves | Network model | Evidence |
+| Plane | What it proves | Network model | Evidence |
 | --- | --- | --- | --- |
-| Component | Express routing, validation, middleware, stable error envelopes | In-process Supertest | Jest assertions + coverage |
-| Transport | Explicit Axios target/timeout policy and failure normalization | Mocked client factory | Jest assertions |
+| Component | Express routing, validation, middleware, error envelopes | In-process Supertest | Jest + coverage |
+| Transport | Target/timeout/error-normalization policy | Mocked Axios boundary | Jest assertions |
 | Contract | Consumer/provider HTTP expectations | Pact mock provider | Pact artifacts |
-| Extended listener | Real Node TCP listener + serialization/correlation | `127.0.0.1:0`, injected deterministic dependency | Local smoke summary |
-| Security | Dependency/configuration exposure | Filesystem analysis | Trivy JSON + Markdown summary |
-| Documentation contract | README links, workflow badges, Mermaid declarations, governance surfaces, badge palette | Repository-local Python stdlib validation | Actions status |
-| Observability | Run identity and runtime dimension | Structured CI metadata | `reports/ci-observability-*.json` + Actions summary |
+| Listener | Real Node TCP + serialization + correlation | Ephemeral loopback + injected dependency | Local smoke summary |
+| External integration | Real dependency behavior | Explicit `UPSTREAM_BASE_URL` | Separate environment signal |
+| Security | Dependency/configuration exposure | Trivy filesystem scan | JSON + Markdown findings |
+| Documentation | README/workflow/governance consistency | Repository-local validator | Actions status |
+
+## Architecture
 
 ```mermaid
 flowchart LR
@@ -39,21 +43,19 @@ flowchart LR
     APP --> ROUTE[posts router]
     ROUTE --> PORT[posts client boundary]
     PORT --> AXIOS[PostsUpstreamClient / Axios]
-    PORT --> ERR[Upstream error normalization]
-    CONTRACT[Pact] --> PROVIDER[Pact mock provider]
-    LISTENER[Extended local TCP smoke] --> APP
-    LISTENER -. deterministic client .-> PORT
+    PORT --> ERR[Error normalization]
+    PACT[Pact] --> MOCK[Pact provider]
+    LISTENER[Loopback listener smoke] --> APP
     SERVER[src/server.js] --> CFG[loadConfig]
     CFG --> PORT
-    APP --> ENVELOPE[Stable API error contract]
-    DOCS[README contract] --> GOVERN[Repository governance]
+    APP --> ENVELOPE[Stable public error contract]
 
     classDef entry fill:#ddf4ff,stroke:#0969da,color:#24292f,stroke-width:1.5px;
     classDef core fill:#f6f8fa,stroke:#57606a,color:#24292f,stroke-width:1.5px;
     classDef evidence fill:#dafbe1,stroke:#1a7f37,color:#24292f,stroke-width:1.5px;
-    class TEST,CONTRACT,LISTENER,SERVER,DOCS entry;
-    class APP,ROUTE,PORT,AXIOS,ERR,PROVIDER,CFG core;
-    class ENVELOPE,GOVERN evidence;
+    class TEST,PACT,LISTENER,SERVER entry;
+    class APP,ROUTE,PORT,AXIOS,ERR,MOCK,CFG core;
+    class ENVELOPE evidence;
     linkStyle default stroke:#57606a,stroke-width:1.4px;
 ```
 
@@ -61,31 +63,29 @@ flowchart LR
 
 | Concern | Framework contract |
 | --- | --- |
-| Fast API tests | Call `createApp({ postsClient })` and use Supertest directly; no listener or external target is required. |
-| Dependency isolation | Routes consume a narrow injected client, not Axios directly. |
-| Runtime target | `UPSTREAM_BASE_URL` is required at real server startup; no public-provider fallback exists. |
-| Transport policy | An explicitly supplied, validated HTTP(S) base URL and timeout exist in one provider-neutral concrete client boundary. |
-| Failure taxonomy | Timeout → `504/upstream_timeout`; other transport outage/reset → `502/upstream_unavailable`. |
-| Application faults | Unknown defects remain `500/internal_server_error`. |
+| Fast API tests | `createApp({ postsClient })` + Supertest; no listener or external target required. |
+| Dependency isolation | Routes consume a narrow injected client, never Axios directly. |
+| Runtime target | `UPSTREAM_BASE_URL` is required for real server startup; no public fallback exists. |
+| Transport policy | One provider-neutral client validates target/timeout and normalizes transport failure. |
+| Failure taxonomy | Timeout → `504/upstream_timeout`; unavailable/reset → `502/upstream_unavailable`. |
 | Input validation | Invalid identifiers fail before the dependency boundary is called. |
-| Correlation | Safe inbound request IDs are preserved; malformed or oversized IDs are replaced before they are reflected into headers, envelopes, or diagnostics. |
-| Listener coverage | Real socket behavior is tested locally with an ephemeral loopback listener and injected dependency. |
-| Logging | Global diagnostics use stable metadata and exclude request bodies/auth values. |
-| Reproducibility | Node 22/24 + committed lockfile + `npm ci`. |
-| Documentation | README-local references, workflow badges, Mermaid roots, governance files, and static badge-color uniqueness are executable contracts. |
+| Correlation | Request IDs are bounded and validated before reflection into headers/evidence. |
+| Listener coverage | Real socket behavior is tested on `127.0.0.1:0` with a deterministic injected dependency. |
+| Logging | Shared diagnostics use safe metadata, not request bodies/auth values. |
+| Reproducibility | Node 22/24, committed lockfile, `npm ci`. |
 
-## Tool ownership model
+## Boundary decision guide
 
-| Tool / technology | Native responsibility | Framework responsibility | Deliberately left visible |
-| --- | --- | --- | --- |
-| Express | Routing, middleware execution, request/response lifecycle, listener integration | Application composition, validation middleware, stable public error envelope, dependency injection | Express request/response semantics and middleware ordering |
-| Supertest | In-process HTTP-style requests against the Express application | Fast component boundary and run-scoped request-agent correlation | Native fluent assertions and application-without-listener execution |
-| Jest | Test lifecycle, assertions, mocks, coverage collection | Component/transport/framework grouping and deterministic doubles | Jest assertion/stack and mock semantics |
-| Axios | Concrete upstream transport, timeout/error objects | Explicit target validation, one provider-neutral client boundary, transport error normalization | Axios-specific errors terminate at the client boundary rather than leaking into public API semantics |
-| Pact | Consumer interaction recording and mock-provider verification | Compatibility plane separate from component behavior | Pact interaction failures remain compatibility evidence, not component failures |
-| Node HTTP / `fetch` | Real listener/socket/serialization behavior | Loopback-only extended smoke with injected deterministic dependency | TCP/listener failures remain runtime signals rather than upstream availability noise |
-| Trivy | Filesystem vulnerability and supported misconfiguration analysis | HIGH/CRITICAL remediation-oriented gate and retained findings | Configured `vuln,misconfig` scan is not generic credential/secret scanning |
-| GitHub Actions | Job/runtime isolation and artifact transport | Node matrix, listener extension, security/docs separation, observability envelope | Native job/process exit state remains authoritative |
+| Requirement | Cheapest sufficient boundary |
+| --- | --- |
+| Route validation/error envelope | Supertest component test |
+| Client timeout/status/error mapping | Transport unit test |
+| Provider interaction compatibility | Pact |
+| Node listener/socket/serialization | Loopback listener smoke |
+| Real dependency/environment | Explicit integration run |
+
+> [!TIP]
+> “End to end” is not a quality level. Use the boundary that introduces exactly the semantics the requirement depends on—and no more unrelated failure causes.
 
 ## Repository map
 
@@ -95,42 +95,21 @@ flowchart LR
 │   ├── app.js
 │   ├── server.js
 │   ├── config.js
-│   ├── clients/
-│   │   ├── postsUpstreamClient.js
-│   │   └── upstreamError.js
+│   ├── clients/{postsUpstreamClient.js,upstreamError.js}
 │   ├── contracts/
 │   ├── middleware/
 │   ├── routes/
 │   ├── testing/
 │   └── tests/
-├── scripts/
-│   └── live-smoke.js
-├── docs/
-│   ├── ARCHITECTURE.md
-│   ├── DEPENDENCY_BOUNDARIES.md
-│   └── TEST_STRATEGY.md
-├── .github/
-│   ├── scripts/
-│   │   └── validate_readme.py
-│   └── workflows/
-│       ├── ci.yml
-│       ├── docs.yml
-│       ├── extended.yml
-│       └── security.yml
+├── scripts/live-smoke.js
+├── docs/{ARCHITECTURE.md,DEPENDENCY_BOUNDARIES.md,TEST_STRATEGY.md}
+├── .github/workflows/{ci,docs,extended,security}.yml
 ├── jest.config.js
 ├── package.json
 └── package-lock.json
 ```
 
-## Documentation contract
-
-`.github/workflows/docs.yml` runs a zero-third-party-dependency repository validator on every pull request and `main`. It verifies deterministic local facts: local Markdown targets exist and remain inside the repository, workflow badges reference committed workflows, Mermaid blocks start with recognized declarations, `LICENSE` and `.github/SECURITY.md` remain present, static Shields colors are unique within this README, and Security Policy remains GitHub-dark `#24292F`.
-
-External website availability is intentionally excluded. An upstream documentation outage is not an Express/Supertest framework defect.
-
 ## Quick start
-
-Node.js 22+ is required.
 
 ```bash
 npm ci
@@ -139,35 +118,33 @@ npm run test:coverage
 python .github/scripts/validate_readme.py
 ```
 
-Exercise the deterministic real-listener boundary:
+Exercise the real listener boundary without an external dependency:
 
 ```bash
 npm run test:live-smoke
 ```
 
-Start the application only when a real upstream dependency has been explicitly approved and configured:
+Start the real service only with an explicitly approved upstream:
 
 ```bash
 UPSTREAM_BASE_URL=https://api.test.example.internal npm start
 ```
 
-`src/server.js` validates the target before binding. Missing, non-HTTP(S), credential-bearing, query-bearing, or fragment-bearing upstream URLs fail closed as configuration errors.
-
 > [!NOTE]
-> The ordinary Supertest suite should not start `src/server.js`. A real listener is more expensive and adds socket lifecycle concerns; those concerns are tested explicitly by the separate local listener contract. Component tests inject their dependency directly and therefore do not require `UPSTREAM_BASE_URL`.
+> Ordinary component tests should not start `src/server.js`. Listener lifecycle and upstream availability are separate concerns and are tested separately.
 
 <details>
 <summary><strong>Command reference</strong></summary>
 
 | Command | Purpose |
 | --- | --- |
-| `npm run check` | Syntax-check framework execution boundaries and the listener smoke utility. |
+| `npm run check` | Syntax-check execution boundaries. |
 | `npm test` | Complete Jest suite. |
 | `npm run test:api` | Component/transport/framework tests. |
-| `npm run test:contract` | Pact consumer contract tests. |
-| `npm run test:coverage` | Full Jest suite with coverage thresholds. |
-| `npm run test:live-smoke` | Real loopback TCP listener with deterministic injected client. |
-| `npm start` | Intentional service listener; requires explicit `UPSTREAM_BASE_URL`. |
+| `npm run test:contract` | Pact consumer contracts. |
+| `npm run test:coverage` | Full Jest suite with thresholds. |
+| `npm run test:live-smoke` | Real loopback TCP listener with injected dependency. |
+| `npm start` | Intentional runtime listener; requires explicit upstream. |
 
 </details>
 
@@ -175,217 +152,90 @@ UPSTREAM_BASE_URL=https://api.test.example.internal npm start
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
-| `PORT` | Listener port for `src/server.js` | `3000` |
-| `UPSTREAM_BASE_URL` | Approved posts dependency base URL | required |
-| `REQUEST_TIMEOUT_MS` | Axios upstream timeout | `8000` |
-| `TEST_RUN_ID` | Test/request correlation prefix | generated UUID |
+| `PORT` | Real listener port | `3000` |
+| `UPSTREAM_BASE_URL` | Approved posts dependency | required |
+| `REQUEST_TIMEOUT_MS` | Axios timeout | `8000` |
+| `TEST_RUN_ID` | Correlation prefix | generated UUID |
 
-Configuration is validated before listener startup. `loadConfig(env)` accepts an injected read-only environment map for framework contracts and defaults to `process.env` only at the real runtime edge. Invalid ports, missing/unsafe URLs, and invalid timeout budgets are framework errors, not request-retry candidates.
-
-## Boundary topology
-
-```mermaid
-flowchart TD
-    C[Component] -->|createApp + fake client| E[Express semantics]
-    V[Validation] --> PURE[Pure identifier contract]
-    T[Transport] -->|Axios factory double| HTTP[Client policy]
-    P[Pact] --> CONTRACT[Consumer compatibility]
-    L[Extended listener] -->|127.0.0.1 ephemeral port| TCP[Node HTTP stack]
-    L -. injected deterministic client .-> E
-    LIVE[Optional external integration] --> CFG[Explicit target configuration]
-    CFG --> EXT[Real dependency]
-
-    classDef entry fill:#ddf4ff,stroke:#0969da,color:#24292f,stroke-width:1.5px;
-    classDef core fill:#f6f8fa,stroke:#57606a,color:#24292f,stroke-width:1.5px;
-    class C,V,T,P,L,LIVE entry;
-    class E,PURE,HTTP,CONTRACT,TCP,CFG,EXT core;
-    linkStyle default stroke:#57606a,stroke-width:1.4px;
-```
-
-A test should use the cheapest boundary that proves the requirement. Do not promote a deterministic component case to a live-network test merely to make it look more end-to-end.
+`loadConfig(env)` accepts an injected environment map for tests and defaults to `process.env` only at the runtime edge. Missing/unsafe URLs, invalid ports, and invalid timeout budgets are configuration errors—not retry candidates.
 
 ## Stable public failure taxonomy
 
 | Failure class | HTTP | Public `error` | Ownership |
 | --- | ---: | --- | --- |
-| Invalid post identifier | 400 | `invalid_post_id` | Request/input |
-| Route missing | 404 | `not_found` | Application routing |
+| Invalid post identifier | 400 | `invalid_post_id` | Input |
+| Route missing | 404 | `not_found` | Routing |
 | Dependency timeout | 504 | `upstream_timeout` | Upstream latency/transport |
 | Dependency unavailable/reset | 502 | `upstream_unavailable` | Upstream availability/transport |
 | Unknown application failure | 500 | `internal_server_error` | Application/unknown |
 
-Every stable error envelope includes `requestId`.
-
-The public vocabulary is intentionally independent of Axios exception messages. Transport libraries may change; the API contract should not change accidentally with them.
+The public vocabulary is intentionally independent of Axios exception messages. Transport libraries may change without silently redefining the API contract.
 
 ## Request correlation
 
-`requestContext` accepts an incoming `x-request-id` only when it matches the bounded token contract `[A-Za-z0-9._:-]{1,128}`. Valid caller-provided IDs are preserved. Empty, malformed, or oversized values are replaced with a generated UUID **before** the identifier is reflected into the response header, stable error envelope, or shared diagnostics. `apiAgent()` generates run-scoped IDs for Supertest tests while retaining Supertest's fluent interface.
+`requestContext` preserves inbound `x-request-id` only when it matches `[A-Za-z0-9._:-]{1,128}`. Invalid/oversized values are replaced before they can be reflected into headers, envelopes, or shared diagnostics.
 
 ```text
 TEST_RUN_ID
-└── bounded request ID
+└── request ID
     ├── response x-request-id
     ├── error envelope requestId
-    └── diagnostic log fields
+    └── diagnostic metadata
 ```
 
-Correlation identifies **which request** failed. It is bounded metadata, not a carrier for credentials, path fragments, or business payloads.
+Correlation identifies a request; it must not become a carrier for credentials or business payloads.
 
-## Deterministic real-listener contract
+## Deterministic listener and contract testing
 
-`scripts/live-smoke.js` deliberately covers what in-process Supertest does not:
+`scripts/live-smoke.js` binds the real application to an ephemeral loopback port, injects a deterministic client, verifies health/posts/validation and request-ID propagation, then closes the listener. No DNS, TLS, runtime upstream configuration, or public service is involved.
 
-1. builds the real Express application;
-2. injects a deterministic posts client;
-3. binds to `127.0.0.1` on port `0` so the OS chooses an ephemeral port;
-4. exercises `/health`, `/posts/42`, and an invalid-ID route through native Node `fetch`;
-5. verifies HTTP serialization and request-ID propagation;
-6. closes the listener deterministically.
+Pact remains a distinct compatibility plane. A Pact failure is provider/consumer contract drift—not a reason to weaken component assertions or add retries.
 
-No public DNS, TLS, runtime target configuration, or upstream service is involved. This isolates Node listener/middleware/runtime regressions from dependency availability.
+## Evidence and security
 
-## Contract testing
+Shared error diagnostics deliberately retain only bounded metadata such as request ID, public error code/status, and error class. Authorization values, cookies, request bodies, upstream bodies, and raw Axios configuration are excluded.
 
-Pact remains a separate responsibility. Component tests prove how this application behaves with a client contract. Pact proves the consumer interaction expected from an independently deployable provider.
+`security.yml` runs Trivy as an independent repository gate. Security failures are not application-test flakiness and must not be “fixed” by retries or coverage exclusions.
 
-The Pact suite uses the same provider-neutral `PostsUpstreamClient` against Pact's local generated provider. A Pact failure should be handled as compatibility drift—not concealed by weakening a component assertion or by relying on public service availability.
+## Dependency maintenance
 
-## Logging and diagnostic policy
+Dependabot maintains **npm** and **GitHub Actions**.
 
-Global error diagnostics are intentionally narrow:
+- weekly Monday 09:00 America/New_York;
+- grouped minor/patch updates for manageable review volume;
+- standalone majors for attributable Express/Jest/Axios/Pact/Node compatibility review;
+- Actions treated as executable supply-chain dependencies;
+- every dependency PR must clear component, contract, listener, security, and documentation gates as applicable.
 
-```text
-requestId
-error class
-public error code
-HTTP status
-```
-
-They exclude authorization values, cookies, request bodies, upstream response bodies, and raw Axios configuration. Tests can assert payloads explicitly; shared framework logs should remain safe by default.
-
-## Security engineering
-
-`.github/workflows/security.yml` uses open-source Trivy filesystem scanning with an immutable action commit (`ed142fd0673e97e23eac54620cfb913e5ce36c25`, `v0.36.0`) and engine `v0.74.0`.
-
-The gate is configured for fixed HIGH/CRITICAL dependency vulnerabilities and HIGH/CRITICAL supported repository/configuration misconfigurations. Findings are preserved as JSON plus a compact Markdown summary. Its configured scanners are `vuln,misconfig`; this repository does not claim that workflow as generic credential/secret scanning.
-
-> [!WARNING]
-> Security findings are not application-test flakiness. Do not add retries, modify HTTP timeout policy, or exclude code from coverage to make a security gate green.
-
-## Observability model
-
-Primary Node 22/24 jobs emit:
-
-```text
-reports/
-├── ci-observability-node-22.json
-├── ci-observability-node-24.json
-└── ci-summary-node-<version>.md
-```
-
-Each JSON envelope contains framework identity, `TEST_RUN_ID`, Node dimension, final job status, commit SHA, and ref. Coverage and Pact artifacts remain the detailed machine evidence; the observability envelope supplies a stable run-level index that can later be consumed by open-source telemetry/log tooling.
-
-Extended listener jobs also publish an Actions summary that explicitly records:
-
-- loopback/ephemeral transport;
-- deterministic injected upstream;
-- Node runtime;
-- gate status;
-- the boundary the smoke is intended to prove.
-
-## CI topology
-
-```mermaid
-flowchart TD
-    PR[Push / PR] --> N22[Node 22 · Check + Jest + Pact]
-    PR --> N24[Node 24 · Check + Jest + Pact]
-    PR --> SEC[Trivy security]
-    PR --> DOCS[README contract]
-    APICHANGE[API/framework change] --> EXT[Extended listener]
-    EXT --> L22[Node 22 loopback]
-    EXT --> L24[Node 24 loopback]
-    N22 --> EV[Coverage + Pact + observability]
-    N24 --> EV
-    L22 --> EV
-    L24 --> EV
-    DOCS --> EV
-
-    classDef entry fill:#ddf4ff,stroke:#0969da,color:#24292f,stroke-width:1.5px;
-    classDef core fill:#f6f8fa,stroke:#57606a,color:#24292f,stroke-width:1.5px;
-    classDef gate fill:#fbefff,stroke:#8250df,color:#24292f,stroke-width:1.5px;
-    classDef evidence fill:#dafbe1,stroke:#1a7f37,color:#24292f,stroke-width:1.5px;
-    classDef security fill:#ffebe9,stroke:#cf222e,color:#24292f,stroke-width:1.5px;
-    class PR,APICHANGE entry;
-    class N22,N24 core;
-    class EXT,L22,L24,DOCS gate;
-    class SEC security;
-    class EV evidence;
-    linkStyle default stroke:#57606a,stroke-width:1.4px;
-```
+Automation proposes a change; test evidence and release-impact review decide whether it is safe.
 
 ## Failure triage
 
-| Signal | First interpretation | Correct first move |
-| --- | --- | --- |
-| Missing/unsafe `UPSTREAM_BASE_URL` | Runtime configuration/ownership | Configure an approved explicit target before starting the server |
-| 400 contract failure | Input validation | Verify route parser and ensure dependency was not called |
-| 502 | Dependency availability | Inspect concrete transport/connectivity |
-| 504 | Dependency latency | Inspect timeout/latency; do not blindly increase timeout |
-| 500 | Application/unknown | Inspect application exception path |
-| Unsafe request ID replaced | Correlation/input metadata | Verify caller-generated correlation format rather than disabling validation |
-| Pact failure | Compatibility | Compare consumer interaction/provider contract |
-| Listener smoke failure | Node listener/middleware/runtime | Reproduce locally; dependency is deterministic |
-| Node-version-only failure | Runtime compatibility | Compare runtime behavior before changing API semantics |
-| Coverage gate | Missing exercised behavior | Add meaningful assertions, not exclusions |
-| README contract | Documentation/governance drift | Fix local target, workflow badge, Mermaid declaration, governance surface, or palette collision |
-| Trivy gate | Dependency/configuration risk | Triage exact finding/remediation |
-
-## Extension rules
-
-When adding a dependency:
-
-1. define a narrow interface consumed by route/service code;
-2. require explicit runtime target ownership;
-3. centralize concrete transport policy in a provider-neutral client;
-4. normalize library-specific errors at the client boundary;
-5. inject deterministic doubles in component tests;
-6. add transport tests for target validation, timeout, resource mapping, and error normalization;
-7. add Pact where independent deployment compatibility matters;
-8. reserve live external testing for an explicit integration layer.
-
-When adding endpoints:
-
-- validate request inputs before dependency calls;
-- preserve stable public error codes;
-- bound and validate reflected correlation metadata;
-- do not return raw dependency exceptions;
-- keep fast route tests deterministic;
-- add listener coverage only when socket/runtime behavior is relevant;
-- update README contracts when public behavior or tool responsibilities change.
+| Signal | First interpretation |
+| --- | --- |
+| Component failure | Express/application contract |
+| Transport unit failure | Client policy/error normalization |
+| Pact failure | Consumer/provider compatibility |
+| Listener-only failure | TCP/runtime/serialization lifecycle |
+| `502` / `504` contract mismatch | Dependency failure semantics |
+| External-target-only failure | Environment/dependency integration |
+| Security/docs | Independent repository governance |
 
 ## Explicit anti-patterns
 
-- starting an HTTP listener for every Supertest test;
-- public-network calls in component tests;
-- silent public-provider defaults in runtime configuration or client constructors;
-- provider identity encoded into reusable client names;
-- mocking Axios from route tests instead of replacing the client boundary;
-- blindly retrying mutating requests;
-- reflecting arbitrary caller-controlled correlation text;
-- leaking dependency error text to callers;
-- classifying all dependency failures as 500;
-- global request-body logging;
-- coverage percentages treated as proof of correctness;
-- `npm install` in CI;
-- listener tests coupled to an external service;
-- README claims or badge surfaces not backed by committed repository state.
+- starting a real listener for every Supertest case;
+- routes importing Axios directly;
+- public provider defaults;
+- leaking Axios error strings into public error contracts;
+- broad retries around application assertions;
+- unbounded caller-controlled correlation IDs;
+- request/auth/upstream payloads in global logs;
+- interpreting Pact as a replacement for component behavior tests.
 
 ## Design references
 
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — application, client, listener, and test boundaries.
-- [`docs/DEPENDENCY_BOUNDARIES.md`](docs/DEPENDENCY_BOUNDARIES.md) — deterministic doubles, transport tests, Pact, and live integration responsibilities.
-- [`docs/TEST_STRATEGY.md`](docs/TEST_STRATEGY.md) — layer selection, negative testing, reliability, and gates.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — application, transport, listener, and evidence boundaries.
+- [`docs/DEPENDENCY_BOUNDARIES.md`](docs/DEPENDENCY_BOUNDARIES.md) — dependency ownership and failure normalization.
+- [`docs/TEST_STRATEGY.md`](docs/TEST_STRATEGY.md) — layer selection and exit criteria.
 
-> [!TIP]
-> A strong API framework makes the failing boundary obvious. If a test cannot tell whether the defect is input validation, application logic, upstream availability, latency, listener/runtime behavior, or contract compatibility, the test topology is carrying too many responsibilities at once.
+A strong Supertest framework makes the failed boundary obvious: **application behavior, input policy, transport normalization, compatibility, listener runtime, or explicit external dependency**.
