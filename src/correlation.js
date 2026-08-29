@@ -4,8 +4,9 @@ const { randomUUID } = require('node:crypto');
 
 const SAFE_CORRELATION_TOKEN = /^[A-Za-z0-9._:-]{1,128}$/;
 
-function correlationToken(name, value, fallback = randomUUID()) {
-  const token = String(value ?? '').trim() || fallback;
+function correlationToken(name, value, fallback) {
+  const candidate = String(value ?? '').trim();
+  const token = candidate || fallback || randomUUID();
   if (!SAFE_CORRELATION_TOKEN.test(token)) {
     throw new Error(
       `${name} must be 1-128 ASCII letters, digits, dots, underscores, colons, or hyphens`
