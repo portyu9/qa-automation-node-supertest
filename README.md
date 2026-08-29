@@ -16,18 +16,19 @@
 [![License](https://img.shields.io/badge/License-MIT-2EA44F?logo=opensourceinitiative&logoColor=white)](LICENSE)
 [![Security Policy](https://img.shields.io/badge/Security-Policy-24292F?logo=github&logoColor=white)](.github/SECURITY.md)
 
-A deterministic API quality-engineering framework built with **Express 5, Supertest, Jest, Axios, and Pact**. Fast component tests execute the real Express application in-process; external transport is isolated behind a provider-neutral client; Pact owns consumer compatibility; and a separate loopback listener contract verifies real TCP/middleware/serialization behavior without public-network nondeterminism.
+A deterministic API quality-engineering framework built with **Express 5, Supertest, Jest, Axios, and Pact**. Fast component tests execute the real Express application in-process; external transport is isolated behind a provider-neutral client; Pact owns consumer compatibility; a separate loopback listener contract verifies real TCP/middleware/serialization behavior; and native Supertest agents/expectations remain available for stateful protocol contracts.
 
 > [!IMPORTANT]
-> Application behavior, transport behavior, contract compatibility, listener behavior, and deployed-environment behavior are different failure domains. The framework keeps those boundaries separate so a failing test answers **what broke** before it asks **where the stack trace ended**.
+> Application behavior, in-process HTTP behavior, dependency transport behavior, contract compatibility, listener behavior, and deployed-environment behavior are different failure domains. The framework keeps those boundaries separate so a failing test answers **what broke** before it asks **where the stack trace ended**.
 
-**Read by intent:** [capabilities](#capability-map) · [architecture](#architecture) · [quick start](#quick-start) · [failure taxonomy](#stable-public-failure-taxonomy) · [correlation](#request-correlation) · [dependencies](#dependency-maintenance) · [triage](#failure-triage)
+**Read by intent:** [capabilities](#capability-map) · [architecture](#architecture) · [quick start](#quick-start) · [native Supertest surface](#native-supertest-protocol-surface) · [failure taxonomy](#stable-public-failure-taxonomy) · [correlation](#request-correlation) · [dependencies](#dependency-maintenance) · [triage](#failure-triage)
 
 ## Capability map
 
 | Plane | What it proves | Network model | Evidence |
 | --- | --- | --- | --- |
 | Component | Express routing, validation, middleware, error envelopes | In-process Supertest | Jest + coverage |
+| Stateful protocol | Cookie persistence, query/body/header composition, redirects, HEAD/OPTIONS, reusable response contracts | `request.agent(app)` | Jest assertions |
 | Transport | Target/timeout/error-normalization policy | Mocked Axios boundary | Jest assertions |
 | Contract | Consumer/provider HTTP expectations | Pact mock provider | Pact artifacts |
 | Listener | Real Node TCP + serialization + correlation | Ephemeral loopback + injected dependency | Local smoke summary |
@@ -39,11 +40,13 @@ A deterministic API quality-engineering framework built with **Express 5, Supert
 
 ```mermaid
 flowchart LR
-    TEST[Jest / Supertest] --> APP[createApp]
+    TEST[Jest / Supertest] --> AGENT[Correlated request.agent]
+    AGENT --> APP[createApp]
     APP --> ROUTE[posts router]
     ROUTE --> PORT[posts client boundary]
     PORT --> AXIOS[PostsUpstreamClient / Axios]
     PORT --> ERR[Error normalization]
+    TEST --> EXPECT[Composable response contracts]
     PACT[Pact] --> MOCK[Pact provider]
     LISTENER[Loopback listener smoke] --> APP
     SERVER[src/server.js] --> CFG[loadConfig]
@@ -54,7 +57,7 @@ flowchart LR
     classDef core fill:#f6f8fa,stroke:#57606a,color:#24292f,stroke-width:1.5px;
     classDef evidence fill:#dafbe1,stroke:#1a7f37,color:#24292f,stroke-width:1.5px;
     class TEST,PACT,LISTENER,SERVER entry;
-    class APP,ROUTE,PORT,AXIOS,ERR,MOCK,CFG core;
+    class AGENT,APP,ROUTE,PORT,AXIOS,ERR,EXPECT,MOCK,CFG core;
     class ENVELOPE evidence;
     linkStyle default stroke:#57606a,stroke-width:1.4px;
 ```
@@ -64,12 +67,14 @@ flowchart LR
 | Concern | Framework contract |
 | --- | --- |
 | Fast API tests | `createApp({ postsClient })` + Supertest; no listener or external target required. |
+| Stateful HTTP | `request.agent(app)` owns cookies across related in-process requests; tests opt into state explicitly. |
 | Dependency isolation | Routes consume a narrow injected client, never Axios directly. |
 | Runtime target | `UPSTREAM_BASE_URL` is required for real server startup; no public fallback exists. |
 | Transport policy | One provider-neutral client validates target/timeout and normalizes transport failure. |
 | Failure taxonomy | Timeout → `504/upstream_timeout`; unavailable/reset → `502/upstream_unavailable`. |
 | Input validation | Invalid identifiers fail before the dependency boundary is called. |
-| Correlation | Request IDs are bounded and validated before reflection into headers/evidence. |
+| Correlation | Framework test requests receive bounded per-request correlation without obscuring native Supertest chaining. |
+| Response policy | Reusable `.expect(fn)` helpers validate JSON/header/body contracts without replacing native `.expect()`. |
 | Listener coverage | Real socket behavior is tested on `127.0.0.1:0` with a deterministic injected dependency. |
 | Logging | Shared diagnostics use safe metadata, not request bodies/auth values. |
 | Reproducibility | Node 22/24, committed lockfile, `npm ci`. |
@@ -79,6 +84,8 @@ flowchart LR
 | Requirement | Cheapest sufficient boundary |
 | --- | --- |
 | Route validation/error envelope | Supertest component test |
+| Cookie/session behavior | Persistent Supertest agent |
+| Query/body/header/redirect/verb behavior | Native Supertest chain |
 | Client timeout/status/error mapping | Transport unit test |
 | Provider interaction compatibility | Pact |
 | Node listener/socket/serialization | Loopback listener smoke |
@@ -99,8 +106,8 @@ flowchart LR
 │   ├── contracts/
 │   ├── middleware/
 │   ├── routes/
-│   ├── testing/
-│   └── tests/
+│   ├── testing/{apiAgent.js,expectations.js}
+│   └── tests/supertestCapabilities.test.js
 ├── scripts/live-smoke.js
 ├── docs/{ARCHITECTURE.md,DEPENDENCY_BOUNDARIES.md,TEST_STRATEGY.md}
 ├── .github/workflows/{ci,docs,extended,security}.yml
@@ -140,7 +147,7 @@ UPSTREAM_BASE_URL=https://api.test.example.internal npm start
 | --- | --- |
 | `npm run check` | Syntax-check execution boundaries. |
 | `npm test` | Complete Jest suite. |
-| `npm run test:api` | Component/transport/framework tests. |
+| `npm run test:api` | Component/transport/framework tests, including native Supertest protocol contracts. |
 | `npm run test:contract` | Pact consumer contracts. |
 | `npm run test:coverage` | Full Jest suite with thresholds. |
 | `npm run test:live-smoke` | Real loopback TCP listener with injected dependency. |
@@ -159,6 +166,23 @@ UPSTREAM_BASE_URL=https://api.test.example.internal npm start
 
 `loadConfig(env)` accepts an injected environment map for tests and defaults to `process.env` only at the runtime edge. Missing/unsafe URLs, invalid ports, and invalid timeout budgets are configuration errors—not retry candidates.
 
+## Native Supertest protocol surface
+
+`src/testing/apiAgent.js` builds on `request.agent(app)`, preserving Supertest's fluent request object while adding one stable framework concern: a unique `x-request-id` derived from the run identity. It exposes common verbs plus generic dispatch without creating a second HTTP DSL.
+
+`src/testing/expectations.js` supplies composable response functions for JSON content type, exact/regex headers, and arbitrary body predicates. They plug directly into native `.expect(fn)` chains.
+
+`src/tests/supertestCapabilities.test.js` proves the pieces compose:
+
+- an agent receives an HTTP-only session cookie and replays it on the next in-process request;
+- `.query()` and `.send()` remain native and can be asserted together with headers/body contracts;
+- request correlation is visible as ordinary HTTP behavior;
+- redirect following uses Supertest's native `.redirects()` support;
+- `HEAD` and `OPTIONS` are exercised alongside normal REST verbs;
+- reusable expectation functions augment—not replace—status/header/body assertions.
+
+Stateful agents should be created for the smallest scenario that requires state. A global shared agent would turn order dependence into hidden infrastructure.
+
 ## Stable public failure taxonomy
 
 | Failure class | HTTP | Public `error` | Ownership |
@@ -173,7 +197,7 @@ The public vocabulary is intentionally independent of Axios exception messages. 
 
 ## Request correlation
 
-`requestContext` preserves inbound `x-request-id` only when it matches `[A-Za-z0-9._:-]{1,128}`. Invalid/oversized values are replaced before they can be reflected into headers, envelopes, or shared diagnostics.
+`requestContext` preserves inbound `x-request-id` only when it matches `[A-Za-z0-9._:-]{1,128}`. Invalid/oversized values are replaced before they can be reflected into headers, envelopes, or shared diagnostics. The test-side `apiAgent` independently generates bounded correlation values for protocol contracts.
 
 ```text
 TEST_RUN_ID
@@ -214,6 +238,8 @@ Automation proposes a change; test evidence and release-impact review decide whe
 | Signal | First interpretation |
 | --- | --- |
 | Component failure | Express/application contract |
+| Agent/cookie mismatch | Stateful in-process HTTP contract |
+| Query/body/header/redirect mismatch | Supertest protocol composition |
 | Transport unit failure | Client policy/error normalization |
 | Pact failure | Consumer/provider compatibility |
 | Listener-only failure | TCP/runtime/serialization lifecycle |
@@ -224,6 +250,8 @@ Automation proposes a change; test evidence and release-impact review decide whe
 ## Explicit anti-patterns
 
 - starting a real listener for every Supertest case;
+- global/shared `request.agent()` state across unrelated tests;
+- wrapping Supertest until native request/response semantics disappear;
 - routes importing Axios directly;
 - public provider defaults;
 - leaking Axios error strings into public error contracts;
@@ -238,4 +266,4 @@ Automation proposes a change; test evidence and release-impact review decide whe
 - [`docs/DEPENDENCY_BOUNDARIES.md`](docs/DEPENDENCY_BOUNDARIES.md) — dependency ownership and failure normalization.
 - [`docs/TEST_STRATEGY.md`](docs/TEST_STRATEGY.md) — layer selection and exit criteria.
 
-A strong Supertest framework makes the failed boundary obvious: **application behavior, input policy, transport normalization, compatibility, listener runtime, or explicit external dependency**.
+A strong Supertest framework makes the failed boundary obvious: **application behavior, stateful in-process HTTP semantics, input policy, transport normalization, compatibility, listener runtime, or explicit external dependency**.
