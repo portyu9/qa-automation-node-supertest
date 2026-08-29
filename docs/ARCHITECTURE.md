@@ -9,8 +9,9 @@ flowchart LR
     T[Supertest component tests] --> APP[Express application]
     APP --> R[Posts router]
     R --> C[Injected posts client]
-    PROD[Production composition] --> APP
-    PROD --> HC[JsonPlaceholderClient]
+    PROD[Server composition] --> CFG[Validated runtime config]
+    CFG --> APP
+    PROD --> HC[PostsUpstreamClient]
     HC --> AX[Axios transport]
     P[Pact tests] --> HC
     APP --> ERR[Stable error middleware]
@@ -18,15 +19,17 @@ flowchart LR
 
 ## Composition and dependency injection
 
-`createApp({ postsClient, config })` is the composition seam for deterministic component tests. Tests inject a client double at the application-facing dependency boundary; they do not mock Express internals or open a TCP listener.
+`createApp({ postsClient, config })` is the composition seam for deterministic component tests. Tests inject a client double at the application-facing dependency boundary; they do not mock Express internals or open a TCP listener. When a client is injected, application construction does not read runtime environment configuration.
 
-Production composition constructs `JsonPlaceholderClient` from validated configuration. This preserves one application pipeline while allowing transport and route semantics to be tested separately.
+`src/server.js` owns production/server composition. It loads validated runtime configuration and then constructs the provider-neutral `PostsUpstreamClient`. This keeps target selection at the executable boundary rather than hiding a provider choice inside reusable application or client code.
 
 ## Configuration boundary
 
-`src/config.js` validates process inputs before server startup.
+`src/config.js` validates runtime inputs before server startup. `loadConfig(env)` accepts an injected read-only environment map for deterministic configuration contracts and defaults to `process.env` only at the real runtime boundary.
 
-`UPSTREAM_BASE_URL` must be an absolute HTTP(S) URL without credentials, query strings, or fragments. Optional path prefixes remain valid. Request timeout and port values must be positive integers. Run IDs are generated when not explicitly supplied.
+`UPSTREAM_BASE_URL` is required. It must be an absolute HTTP(S) URL without credentials, query strings, or fragments. Optional path prefixes remain valid. Request timeout and port values must be positive integers. Run IDs are generated when not explicitly supplied.
+
+There is no public-provider fallback. Missing upstream ownership is a configuration error before the server binds a port or Axios opens transport.
 
 The framework does not encode credentials in upstream URLs. Authentication, if added later, belongs in a controlled transport-header/interceptor policy.
 
@@ -38,9 +41,9 @@ Request IDs are useful for one HTTP exchange; run IDs group a test execution. Do
 
 ## Upstream transport boundary
 
-`JsonPlaceholderClient` owns:
+`PostsUpstreamClient` owns:
 
-- upstream base URL;
+- validation of explicitly supplied upstream base URLs;
 - bounded Axios timeout;
 - mapping logical operations to resource paths;
 - normalization of raw transport failures into `UpstreamServiceError`.
@@ -69,13 +72,13 @@ Validation belongs at the boundary that owns the input. A transport client shoul
 
 ## Contract boundary
 
-Pact tests execute the real consumer client against Pact's generated provider substitute. They verify HTTP expectations without contacting the live external provider.
+Pact tests execute the real provider-neutral consumer client against Pact's generated provider substitute. They verify HTTP expectations without contacting a live external provider.
 
 Pact does not replace component tests: component tests validate Express routing/envelopes, while Pact validates the consumer's outbound interaction contract.
 
 ## Server lifecycle
 
-`src/server.js` is the real TCP-hosting edge. Most tests import the application directly rather than spawning the server. This avoids fixed-port conflicts, slow startup, and open-handle leaks in the ordinary test suite.
+`src/server.js` is the real TCP-hosting edge. It is the only ordinary path that requires an external upstream target. Most tests call `createApp()` with an injected client rather than spawning the server. This avoids fixed-port conflicts, public-network coupling, slow startup, and open-handle leaks in the ordinary test suite.
 
 Graceful SIGTERM/SIGINT behavior belongs to the server lifecycle, not route tests.
 
@@ -83,7 +86,8 @@ Graceful SIGTERM/SIGINT behavior belongs to the server lifecycle, not route test
 
 New behavior should preserve these boundaries:
 
-- validate runtime configuration before server startup;
+- require explicit external-target ownership before server startup;
+- validate runtime configuration before transport or listener side effects;
 - inject external dependencies at client/domain seams;
 - test routes in-process with Supertest;
 - normalize transport implementation details before they reach public error responses;
