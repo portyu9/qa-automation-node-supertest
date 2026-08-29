@@ -73,3 +73,14 @@ jobs:
             reports/
           if-no-files-found: ignore
           retention-days: 14
+
+  container:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build tracked application image
+        run: docker build -t qa-supertest:ci .
+      - name: Validate packaged test entrypoint
+        run: docker run --rm qa-supertest:ci
