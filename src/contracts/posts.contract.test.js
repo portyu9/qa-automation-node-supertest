@@ -1,6 +1,6 @@
 const path = require('node:path');
 const { Pact, Matchers, SpecificationVersion } = require('@pact-foundation/pact');
-const JsonPlaceholderClient = require('../clients/jsonPlaceholderClient');
+const PostsUpstreamClient = require('../clients/postsUpstreamClient');
 
 const pact = new Pact({
   consumer: 'PostsConsumer',
@@ -27,7 +27,7 @@ describe('Posts API consumer contract', () => {
         });
       })
       .executeTest(async (mockServer) => {
-        const client = new JsonPlaceholderClient(mockServer.url);
+        const client = new PostsUpstreamClient(mockServer.url);
         const response = await client.getPost(1);
 
         expect(response.status).toBe(200);
