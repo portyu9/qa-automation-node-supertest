@@ -3,6 +3,7 @@
 [![CI](https://github.com/portyu9/qa-automation-node-supertest/actions/workflows/ci.yml/badge.svg)](https://github.com/portyu9/qa-automation-node-supertest/actions/workflows/ci.yml)
 [![Extended](https://github.com/portyu9/qa-automation-node-supertest/actions/workflows/extended.yml/badge.svg)](https://github.com/portyu9/qa-automation-node-supertest/actions/workflows/extended.yml)
 [![Security](https://github.com/portyu9/qa-automation-node-supertest/actions/workflows/security.yml/badge.svg)](https://github.com/portyu9/qa-automation-node-supertest/actions/workflows/security.yml)
+[![Docs](https://github.com/portyu9/qa-automation-node-supertest/actions/workflows/docs.yml/badge.svg)](https://github.com/portyu9/qa-automation-node-supertest/actions/workflows/docs.yml)
 
 [![Node.js](https://img.shields.io/badge/Node.js-runtime-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![JavaScript](https://img.shields.io/badge/JavaScript-language-F7DF1E?logo=javascript&logoColor=black)](https://developer.mozilla.org/docs/Web/JavaScript)
@@ -13,12 +14,12 @@
 [![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-CI-2088FF?logo=githubactions&logoColor=white)](https://github.com/features/actions)
 [![Trivy](https://img.shields.io/badge/Trivy-security-1904DA?logo=trivy&logoColor=white)](https://trivy.dev/)
 [![License](https://img.shields.io/badge/License-MIT-2EA44F?logo=opensourceinitiative&logoColor=white)](LICENSE)
-[![Security Policy](https://img.shields.io/badge/Security-Policy-6E7781?logo=github&logoColor=white)](.github/SECURITY.md)
+[![Security Policy](https://img.shields.io/badge/Security-Policy-24292F?logo=github&logoColor=white)](.github/SECURITY.md)
 
 A deterministic API quality-engineering framework built with **Express 5**, **Supertest**, **Jest**, **Axios**, and **Pact**. The fast layer exercises the Express application in-process, external transport is isolated behind a client boundary, dependency failures are normalized into stable public semantics, and an extended local-listener contract validates the real TCP/middleware/serialization path without introducing public-network nondeterminism.
 
 > [!IMPORTANT]
-> The framework separates **application behavior**, **transport behavior**, **consumer compatibility**, and **listener/runtime behavior**. Those are distinct failure domains and should stay distinct in both test design and triage.
+> The framework separates **application behavior**, **transport behavior**, **consumer compatibility**, **listener/runtime behavior**, and **documentation governance**. Those are distinct failure domains and should stay distinct in both test design and triage.
 
 ## Capability map
 
@@ -29,6 +30,7 @@ A deterministic API quality-engineering framework built with **Express 5**, **Su
 | Contract | Consumer/provider HTTP expectations | Pact mock provider | Pact artifacts |
 | Extended listener | Real Node TCP listener + serialization/correlation | `127.0.0.1:0`, injected deterministic dependency | Local smoke summary |
 | Security | Dependency/configuration exposure | Filesystem analysis | Trivy JSON + Markdown summary |
+| Documentation contract | README links, workflow badges, Mermaid declarations, governance surfaces, badge palette | Repository-local Python stdlib validation | Actions status |
 | Observability | Run identity and runtime dimension | Structured CI metadata | `reports/ci-observability-*.json` + Actions summary |
 
 ```mermaid
@@ -42,13 +44,14 @@ flowchart LR
     LISTENER[Extended local TCP smoke] --> APP
     LISTENER -. deterministic client .-> PORT
     APP --> ENVELOPE[Stable API error contract]
+    DOCS[README contract] --> GOVERN[Repository governance]
 
     classDef entry fill:#ddf4ff,stroke:#0969da,color:#24292f,stroke-width:1.5px;
     classDef core fill:#f6f8fa,stroke:#57606a,color:#24292f,stroke-width:1.5px;
     classDef evidence fill:#dafbe1,stroke:#1a7f37,color:#24292f,stroke-width:1.5px;
-    class TEST,CONTRACT,LISTENER entry;
+    class TEST,CONTRACT,LISTENER,DOCS entry;
     class APP,ROUTE,PORT,AXIOS,ERR,PROVIDER core;
-    class ENVELOPE evidence;
+    class ENVELOPE,GOVERN evidence;
     linkStyle default stroke:#57606a,stroke-width:1.4px;
 ```
 
@@ -62,10 +65,24 @@ flowchart LR
 | Failure taxonomy | Timeout → `504/upstream_timeout`; other transport outage/reset → `502/upstream_unavailable`. |
 | Application faults | Unknown defects remain `500/internal_server_error`. |
 | Input validation | Invalid identifiers fail before the dependency boundary is called. |
-| Correlation | Request IDs are created/propagated and returned in stable error envelopes. |
+| Correlation | Safe inbound request IDs are preserved; malformed or oversized IDs are replaced before they are reflected into headers, envelopes, or diagnostics. |
 | Listener coverage | Real socket behavior is tested locally with an ephemeral loopback listener and injected dependency. |
 | Logging | Global diagnostics use stable metadata and exclude request bodies/auth values. |
 | Reproducibility | Node 22/24 + committed lockfile + `npm ci`. |
+| Documentation | README-local references, workflow badges, Mermaid roots, governance files, and static badge-color uniqueness are executable contracts. |
+
+## Tool ownership model
+
+| Tool / technology | Native responsibility | Framework responsibility | Deliberately left visible |
+| --- | --- | --- | --- |
+| Express | Routing, middleware execution, request/response lifecycle, listener integration | Application composition, validation middleware, stable public error envelope, dependency injection | Express request/response semantics and middleware ordering |
+| Supertest | In-process HTTP-style requests against the Express application | Fast component boundary and run-scoped request-agent correlation | Native fluent assertions and application-without-listener execution |
+| Jest | Test lifecycle, assertions, mocks, coverage collection | Component/transport/framework grouping and deterministic doubles | Jest assertion/stack and mock semantics |
+| Axios | Concrete upstream transport, timeout/error objects | One client boundary, validated base URL/timeout, transport error normalization | Axios-specific errors terminate at the client boundary rather than leaking into public API semantics |
+| Pact | Consumer interaction recording and mock-provider verification | Compatibility plane separate from component behavior | Pact interaction failures remain compatibility evidence, not component failures |
+| Node HTTP / `fetch` | Real listener/socket/serialization behavior | Loopback-only extended smoke with injected deterministic dependency | TCP/listener failures remain runtime signals rather than upstream availability noise |
+| Trivy | Filesystem vulnerability and supported misconfiguration analysis | HIGH/CRITICAL remediation-oriented gate and retained findings | Configured `vuln,misconfig` scan is not generic credential/secret scanning |
+| GitHub Actions | Job/runtime isolation and artifact transport | Node matrix, listener extension, security/docs separation, observability envelope | Native job/process exit state remains authoritative |
 
 ## Repository map
 
@@ -88,14 +105,24 @@ flowchart LR
 │   ├── ARCHITECTURE.md
 │   ├── DEPENDENCY_BOUNDARIES.md
 │   └── TEST_STRATEGY.md
-├── .github/workflows/
-│   ├── ci.yml
-│   ├── extended.yml
-│   └── security.yml
+├── .github/
+│   ├── scripts/
+│   │   └── validate_readme.py
+│   └── workflows/
+│       ├── ci.yml
+│       ├── docs.yml
+│       ├── extended.yml
+│       └── security.yml
 ├── jest.config.js
 ├── package.json
 └── package-lock.json
 ```
+
+## Documentation contract
+
+`.github/workflows/docs.yml` runs a zero-third-party-dependency repository validator on every pull request and `main`. It verifies deterministic local facts: local Markdown targets exist and remain inside the repository, workflow badges reference committed workflows, Mermaid blocks start with recognized declarations, `LICENSE` and `.github/SECURITY.md` remain present, static Shields colors are unique within this README, and Security Policy remains GitHub-dark `#24292F`.
+
+External website availability is intentionally excluded. An upstream documentation outage is not an Express/Supertest framework defect.
 
 ## Quick start
 
@@ -105,6 +132,7 @@ Node.js 22+ is required.
 npm ci
 npm run check
 npm run test:coverage
+python .github/scripts/validate_readme.py
 ```
 
 Exercise the deterministic real-listener boundary:
@@ -185,17 +213,17 @@ The public vocabulary is intentionally independent of Axios exception messages. 
 
 ## Request correlation
 
-`requestContext` creates or propagates a request identifier and returns it through `x-request-id`. `apiAgent()` generates run-scoped IDs for Supertest tests while retaining Supertest’s fluent interface.
+`requestContext` accepts an incoming `x-request-id` only when it matches the bounded token contract `[A-Za-z0-9._:-]{1,128}`. Valid caller-provided IDs are preserved. Empty, malformed, or oversized values are replaced with a generated UUID **before** the identifier is reflected into the response header, stable error envelope, or shared diagnostics. `apiAgent()` generates run-scoped IDs for Supertest tests while retaining Supertest's fluent interface.
 
 ```text
 TEST_RUN_ID
-└── request ID
+└── bounded request ID
     ├── response x-request-id
     ├── error envelope requestId
     └── diagnostic log fields
 ```
 
-Correlation identifies **which request** failed. It should never be used to carry credentials or business payloads.
+Correlation identifies **which request** failed. It is bounded metadata, not a carrier for credentials, path fragments, or business payloads.
 
 ## Deterministic real-listener contract
 
@@ -233,7 +261,7 @@ They exclude authorization values, cookies, request bodies, upstream response bo
 
 `.github/workflows/security.yml` uses open-source Trivy filesystem scanning with an immutable action commit (`ed142fd0673e97e23eac54620cfb913e5ce36c25`, `v0.36.0`) and engine `v0.74.0`.
 
-The gate is configured for fixed HIGH/CRITICAL dependency vulnerabilities and HIGH/CRITICAL supported repository/configuration misconfigurations. Findings are preserved as JSON plus a compact Markdown summary.
+The gate is configured for fixed HIGH/CRITICAL dependency vulnerabilities and HIGH/CRITICAL supported repository/configuration misconfigurations. Findings are preserved as JSON plus a compact Markdown summary. Its configured scanners are `vuln,misconfig`; this repository does not claim that workflow as generic credential/secret scanning.
 
 > [!WARNING]
 > Security findings are not application-test flakiness. Do not add retries, modify HTTP timeout policy, or exclude code from coverage to make a security gate green.
@@ -266,6 +294,7 @@ flowchart TD
     PR[Push / PR] --> N22[Node 22 · Check + Jest + Pact]
     PR --> N24[Node 24 · Check + Jest + Pact]
     PR --> SEC[Trivy security]
+    PR --> DOCS[README contract]
     APICHANGE[API/framework change] --> EXT[Extended listener]
     EXT --> L22[Node 22 loopback]
     EXT --> L24[Node 24 loopback]
@@ -273,6 +302,7 @@ flowchart TD
     N24 --> EV
     L22 --> EV
     L24 --> EV
+    DOCS --> EV
 
     classDef entry fill:#ddf4ff,stroke:#0969da,color:#24292f,stroke-width:1.5px;
     classDef core fill:#f6f8fa,stroke:#57606a,color:#24292f,stroke-width:1.5px;
@@ -281,7 +311,7 @@ flowchart TD
     classDef security fill:#ffebe9,stroke:#cf222e,color:#24292f,stroke-width:1.5px;
     class PR,APICHANGE entry;
     class N22,N24 core;
-    class EXT,L22,L24 gate;
+    class EXT,L22,L24,DOCS gate;
     class SEC security;
     class EV evidence;
     linkStyle default stroke:#57606a,stroke-width:1.4px;
@@ -295,10 +325,12 @@ flowchart TD
 | 502 | Dependency availability | Inspect concrete transport/connectivity |
 | 504 | Dependency latency | Inspect timeout/latency; do not blindly increase timeout |
 | 500 | Application/unknown | Inspect application exception path |
+| Unsafe request ID replaced | Correlation/input metadata | Verify caller-generated correlation format rather than disabling validation |
 | Pact failure | Compatibility | Compare consumer interaction/provider contract |
 | Listener smoke failure | Node listener/middleware/runtime | Reproduce locally; dependency is deterministic |
 | Node-version-only failure | Runtime compatibility | Compare runtime behavior before changing API semantics |
 | Coverage gate | Missing exercised behavior | Add meaningful assertions, not exclusions |
+| README contract | Documentation/governance drift | Fix local target, workflow badge, Mermaid declaration, governance surface, or palette collision |
 | Trivy gate | Dependency/configuration risk | Triage exact finding/remediation |
 
 ## Extension rules
@@ -317,10 +349,11 @@ When adding endpoints:
 
 - validate request inputs before dependency calls;
 - preserve stable public error codes;
-- correlate failures with request IDs;
+- bound and validate reflected correlation metadata;
 - do not return raw dependency exceptions;
 - keep fast route tests deterministic;
-- add listener coverage only when socket/runtime behavior is relevant.
+- add listener coverage only when socket/runtime behavior is relevant;
+- update README contracts when public behavior or tool responsibilities change.
 
 ## Explicit anti-patterns
 
@@ -328,12 +361,14 @@ When adding endpoints:
 - public-network calls in component tests;
 - mocking Axios from route tests instead of replacing the client boundary;
 - blindly retrying mutating requests;
+- reflecting arbitrary caller-controlled correlation text;
 - leaking dependency error text to callers;
 - classifying all dependency failures as 500;
 - global request-body logging;
 - coverage percentages treated as proof of correctness;
 - `npm install` in CI;
-- listener tests coupled to an external service.
+- listener tests coupled to an external service;
+- README claims or badge surfaces not backed by committed repository state.
 
 ## Design references
 
