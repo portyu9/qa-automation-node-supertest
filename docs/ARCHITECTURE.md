@@ -2,11 +2,12 @@
 
 ## Design objective
 
-The framework separates HTTP application behavior from outbound dependency transport. Supertest exercises Express in-process; the upstream client owns Axios configuration; Pact owns consumer interaction contracts. Each boundary can fail independently and should produce an attributable signal.
+The framework separates HTTP application behavior from outbound dependency transport. Supertest exercises Express in-process; the upstream client owns Axios configuration; Pact owns consumer interaction contracts; the tracked container owns one packaged execution path. Each boundary can fail independently and should produce an attributable signal.
 
 ```mermaid
 flowchart LR
-    T[Supertest component tests] --> APP[Express application]
+    T[Supertest component tests] --> AG[apiAgent]
+    AG --> APP[Express application]
     APP --> R[Posts router]
     R --> C[Injected posts client]
     PROD[Server composition] --> CFG[Validated runtime config]
@@ -15,6 +16,7 @@ flowchart LR
     HC --> AX[Axios transport]
     P[Pact tests] --> HC
     APP --> ERR[Stable error middleware]
+    DOCKER[Tracked Dockerfile] --> TESTS[npm test as non-root node]
 ```
 
 ## Composition and dependency injection
@@ -27,17 +29,40 @@ flowchart LR
 
 `src/config.js` validates runtime inputs before server startup. `loadConfig(env)` accepts an injected read-only environment map for deterministic configuration contracts and defaults to `process.env` only at the real runtime boundary.
 
-`UPSTREAM_BASE_URL` is required. It must be an absolute HTTP(S) URL without credentials, query strings, or fragments. Optional path prefixes remain valid. Request timeout and port values must be positive integers. Run IDs are generated when not explicitly supplied.
+`UPSTREAM_BASE_URL` is required. It must be an absolute HTTP(S) URL with a hostname and without credentials, query strings, or fragments. Optional path prefixes remain valid. Request timeout and port values must be positive integers.
+
+Supplied `TEST_RUN_ID` values are normalized through the shared correlation-token policy and limited to 1–128 ASCII letters, digits, dots, underscores, colons, or hyphens. Missing run identity receives a generated UUID.
 
 There is no public-provider fallback. Missing upstream ownership is a configuration error before the server binds a port or Axios opens transport.
 
 The framework does not encode credentials in upstream URLs. Authentication, if added later, belongs in a controlled transport-header/interceptor policy.
 
-## Request correlation
+## Request and run correlation
 
-`requestContext` establishes one request ID for each inbound request and returns it in `x-request-id` as well as stable JSON error envelopes. Test helpers can inject a run correlation header independently.
+`requestContext` establishes one request ID for each inbound request and returns it in `x-request-id` as well as stable JSON error envelopes. Unsafe or oversized inbound request IDs are replaced by a bounded generated UUID.
 
-Request IDs are useful for one HTTP exchange; run IDs group a test execution. Do not collapse them into a single identifier because they have different cardinality and ownership.
+`apiAgent()` deliberately separates the two correlation dimensions:
+
+- `x-test-run-id` carries the validated run token shared across requests from the same test execution;
+- `x-request-id` is a fresh UUID per HTTP exchange.
+
+This prevents a long run ID plus UUID suffix from violating the request-ID length contract and being silently replaced by middleware. Request IDs identify one exchange; run IDs group a test execution.
+
+## Stateful Supertest boundary
+
+`src/testing/apiAgent.js` owns a scoped `request.agent(app)` so cookie persistence is explicit and local to the helper instance. It exposes generic verb dispatch plus ordinary verb helpers without hiding native Supertest chaining.
+
+`src/testing/expectations.js` contains reusable `.expect(fn)` contracts for JSON responses, headers, and body predicates. Capability tests prove that the helper still composes with native Supertest features:
+
+- query parameters;
+- JSON request bodies;
+- request/response headers;
+- cookie persistence;
+- redirect following;
+- `HEAD` and `OPTIONS`;
+- custom expectation callbacks.
+
+A shared process-global agent is intentionally avoided because it would make cookies and other transport state leak across tests.
 
 ## Upstream transport boundary
 
@@ -82,16 +107,31 @@ Pact does not replace component tests: component tests validate Express routing/
 
 Graceful SIGTERM/SIGINT behavior belongs to the server lifecycle, not route tests.
 
+## Packaged execution boundary
+
+The root `Dockerfile` is a tracked test/runtime packaging contract, not an unverified deployment decoration.
+
+- the base Node image is maintained through a dedicated Docker Dependabot block;
+- CI builds the tracked Dockerfile and executes its existing `npm test` entrypoint;
+- the image remains non-root (`USER node`);
+- the working directory is explicitly owned by `node` so Pact can create test evidence without elevated permissions;
+- `.dockerignore` excludes `.git`, CI metadata, local dependencies, reports, Pact output, environment files, logs, and editor state from the build context.
+
+This ensures local untracked material cannot be copied into the image merely because `Dockerfile` uses `COPY . .`.
+
 ## Extension rules
 
 New behavior should preserve these boundaries:
 
 - require explicit external-target ownership before server startup;
-- validate runtime configuration before transport or listener side effects;
+- validate runtime configuration and correlation tokens before transport or listener side effects;
 - inject external dependencies at client/domain seams;
 - test routes in-process with Supertest;
+- keep run correlation distinct from per-request identity;
+- keep stateful `request.agent` instances scoped rather than global;
 - normalize transport implementation details before they reach public error responses;
 - keep public error codes/statuses stable and documented;
 - avoid logging bodies, auth headers, or raw dependency messages;
+- keep container build context minimized and the packaged test path non-root;
 - add a deterministic test for every new failure classification;
 - use Pact only for consumer/provider expectations, not as a substitute for component behavior tests.
