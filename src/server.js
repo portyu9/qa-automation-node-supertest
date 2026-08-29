@@ -1,7 +1,8 @@
-const app = require('./app');
+const { createApp } = require('./app');
 const { loadConfig } = require('./config');
 
 const config = loadConfig();
+const app = createApp({ config });
 const server = app.listen(config.port, () => {
   console.log(`API server listening on port ${config.port}`);
 });
