@@ -16,7 +16,7 @@
     "test:contract": "jest src/contracts --runInBand",
     "test:api": "jest src/tests --runInBand",
     "test:live-smoke": "node scripts/live-smoke.js",
-    "check": "node --check src/app.js && node --check src/server.js && node --check src/config.js && node --check src/clients/jsonPlaceholderClient.js && node --check src/clients/upstreamError.js && node --check src/routes/posts.js && node --check src/testing/apiAgent.js && node --check scripts/live-smoke.js"
+    "check": "node --check src/app.js && node --check src/server.js && node --check src/config.js && node --check src/clients/postsUpstreamClient.js && node --check src/clients/upstreamError.js && node --check src/routes/posts.js && node --check src/testing/apiAgent.js && node --check scripts/live-smoke.js"
   },
   "license": "MIT",
   "dependencies": {
