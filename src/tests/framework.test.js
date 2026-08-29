@@ -78,6 +78,8 @@ describe('framework contracts', () => {
   });
 
   test.each([
+    ['PORT', '0'],
+    ['PORT', '65536'],
     ['REQUEST_TIMEOUT_MS', '0'],
     ['UPSTREAM_BASE_URL', 'localhost:8080'],
     ['UPSTREAM_BASE_URL', 'https://:443'],
