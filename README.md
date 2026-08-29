@@ -100,7 +100,6 @@ flowchart LR
 │   └── tests/
 ├── scripts/
 │   └── live-smoke.js
-├── postman/
 ├── docs/
 │   ├── ARCHITECTURE.md
 │   ├── DEPENDENCY_BOUNDARIES.md
