@@ -10,32 +10,42 @@ The suite is designed so request behavior, dependency transport, and consumer co
 | --- | --- | ---: | --- |
 | Framework/unit | Jest | No | Configuration, validation helpers, client normalization |
 | Component | Jest + Supertest | No | Express middleware/routes, envelopes, correlation, failure translation |
-| Transport contract | Jest with Axios double | No | Base URL, timeout, resource mapping, normalized transport failures |
+| Transport contract | Jest with Axios double | No | Explicit base URL, timeout, resource mapping, normalized transport failures |
 | Consumer contract | Pact | Local generated provider | Consumer/provider HTTP expectations |
 | Live provider | Optional integration | Yes | Environment/provider compatibility |
 
 ## Configuration-negative tests
 
-Runtime configuration must fail before server startup when inputs are unsafe. Tests cover:
+Runtime configuration must fail before server startup when inputs are missing or unsafe. Tests cover:
 
+- missing `UPSTREAM_BASE_URL`;
 - non-positive request timeout;
 - non-absolute upstream URL;
 - URL credentials;
 - query-bearing upstream URL;
 - fragment-bearing upstream URL.
 
-The validated base URL may include a path prefix. Authentication must not be encoded in URL user-info.
+The validated base URL may include a path prefix. Authentication must not be encoded in URL user-info. There is no implicit public-provider default.
+
+`loadConfig(env)` accepts an injected environment map so these contracts do not mutate process-global state. The real server entry point uses `process.env` only when it owns runtime composition.
 
 ## Component-test rules
 
-Component tests call the Express application directly with Supertest and inject a client double. They do not:
+Component tests call `createApp({ postsClient })` directly with Supertest and inject a client double. They do not:
 
 - bind a TCP port;
-- contact the real upstream provider;
+- load external runtime configuration;
+- contact a real upstream provider;
 - mock internal Express response objects;
 - depend on test order.
 
 This makes route validation, correlation, and error envelopes deterministic and fast.
+
+## Transport-client rules
+
+`PostsUpstreamClient` is provider-neutral and requires a target to be supplied explicitly. Its unit contract rejects missing/unsafe URLs before Axios transport is created, verifies timeout/base-URL/resource mapping, and proves normalization of transport failures.
+
+Provider identity must never be encoded in the reusable client name or default constructor behavior. Environment selection belongs to server composition or an explicitly configured integration test.
 
 ## Dependency-failure coverage
 
@@ -55,7 +65,7 @@ Invalid route identifiers are rejected before the client is called. Every bounda
 
 ## Contract strategy
 
-Pact tests verify interactions the consumer expects from its provider. They are useful for compatibility, not for Express route behavior or dependency-outage semantics.
+Pact tests verify interactions the consumer expects from its provider. They use the same provider-neutral client against Pact's repository-controlled mock server, not a public service.
 
 Keep Pact interactions minimal and semantically meaningful. A generated Pact file is an artifact for provider verification, not a substitute for deterministic service tests.
 
@@ -79,7 +89,7 @@ Any future stateful database/cache dependency requires per-test or transaction-s
 
 | Failure class | First interpretation |
 | --- | --- |
-| Configuration | Runtime input/framework policy defect |
+| Missing/unsafe runtime target | Configuration/ownership defect |
 | Component 4xx assertion | Request validation or route contract defect |
 | Component 502/504 assertion | Dependency-failure translation defect |
 | Transport normalization | Client/library-boundary defect |
@@ -93,9 +103,11 @@ A service/framework change is ready when:
 
 - syntax checks pass across execution boundaries;
 - Jest tests and coverage thresholds pass on supported Node versions;
-- configuration-negative contracts pass;
+- missing/unsafe configuration contracts pass without process-global mutation;
 - every changed public failure classification has deterministic component coverage;
+- provider-neutral transport-client contracts pass;
 - consumer contracts pass when changed;
 - no live dependency is required for the ordinary component gate;
+- server startup cannot silently select a public provider;
 - logs/public responses remain free of raw secret-bearing dependency context;
 - documentation reflects any changed boundary or public error semantics.
