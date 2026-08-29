@@ -3,13 +3,7 @@ const { UpstreamServiceError } = require('../clients/upstreamError');
 const { apiAgent } = require('../testing/apiAgent');
 
 function testApp(postsClient) {
-  return createApp({
-    postsClient,
-    config: {
-      upstreamBaseUrl: 'http://unused.invalid',
-      requestTimeoutMs: 1_000,
-    },
-  });
+  return createApp({ postsClient });
 }
 
 describe('/posts component boundary', () => {
