@@ -1,12 +1,11 @@
 'use strict';
 
 const { randomUUID } = require('node:crypto');
-
-const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
+const { SAFE_CORRELATION_TOKEN } = require('../correlation');
 
 function normalizeRequestId(value) {
   const candidate = String(value || '').trim();
-  return REQUEST_ID_PATTERN.test(candidate) ? candidate : randomUUID();
+  return SAFE_CORRELATION_TOKEN.test(candidate) ? candidate : randomUUID();
 }
 
 function requestContext(req, res, next) {
