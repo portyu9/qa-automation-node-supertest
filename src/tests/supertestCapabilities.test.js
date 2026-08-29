@@ -27,6 +27,7 @@ function capabilityApp() {
 
   app.post('/echo', (req, res) => {
     res.set('x-request-id', req.headers['x-request-id'] || 'missing');
+    res.set('x-test-run-id', req.headers['x-test-run-id'] || 'missing');
     res.json({ query: req.query, body: req.body });
   });
 
@@ -62,7 +63,7 @@ describe('Supertest transport capability contracts', () => {
   });
 
   test('query, JSON body, headers, and custom expect functions compose in one chain', async () => {
-    const client = apiAgent(capabilityApp(), { runId: 'composition' });
+    const client = apiAgent(capabilityApp(), { runId: ' composition:42 ' });
 
     await client
       .post('/echo')
@@ -70,7 +71,8 @@ describe('Supertest transport capability contracts', () => {
       .send({ value: 42, enabled: true })
       .expect(200)
       .expect(expectJsonResponse)
-      .expect(expectHeader('x-request-id', /^composition-[0-9a-f-]+$/i))
+      .expect(expectHeader('x-request-id', /^[0-9a-f-]{36}$/i))
+      .expect(expectHeader('x-test-run-id', 'composition:42'))
       .expect(
         expectBody(
           (body) =>
@@ -82,6 +84,13 @@ describe('Supertest transport capability contracts', () => {
         )
       );
   });
+
+  test.each(['unsafe run id', 'line-break\nheader', 'x'.repeat(129)])(
+    'rejects unsafe run correlation before issuing a request: %s',
+    (runId) => {
+      expect(() => apiAgent(capabilityApp(), { runId })).toThrow(/runId/);
+    }
+  );
 
   test('redirect following and generic verb dispatch remain available through the framework agent', async () => {
     const client = apiAgent(capabilityApp(), { runId: 'protocol' });
