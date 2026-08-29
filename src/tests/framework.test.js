@@ -1,3 +1,4 @@
+const request = require('supertest');
 const app = require('../app');
 const { loadConfig } = require('../config');
 const { apiAgent } = require('../testing/apiAgent');
@@ -9,6 +10,31 @@ describe('framework contracts', () => {
 
     expect(response.headers['x-request-id']).toBeTruthy();
     expect(response.body.status).toBe('ok');
+    expect(response.body.requestId).toBe(response.headers['x-request-id']);
+  });
+
+  test('safe inbound request ids are preserved', async () => {
+    const incoming = 'upstream.request-42';
+    const response = await request(app)
+      .get('/health')
+      .set('x-request-id', incoming)
+      .expect(200);
+
+    expect(response.headers['x-request-id']).toBe(incoming);
+    expect(response.body.requestId).toBe(incoming);
+  });
+
+  test('oversized inbound request ids are replaced with a bounded generated id', async () => {
+    const incoming = 'x'.repeat(129);
+    const response = await request(app)
+      .get('/health')
+      .set('x-request-id', incoming)
+      .expect(200);
+
+    expect(response.headers['x-request-id']).not.toBe(incoming);
+    expect(response.headers['x-request-id']).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+    );
     expect(response.body.requestId).toBe(response.headers['x-request-id']);
   });
 
