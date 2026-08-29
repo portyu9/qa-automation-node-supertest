@@ -2,8 +2,8 @@
 
 const { randomUUID } = require('node:crypto');
 
-function positiveInteger(name, fallback) {
-  const raw = process.env[name];
+function positiveInteger(name, fallback, env) {
+  const raw = env[name];
   if (raw === undefined) return fallback;
   const value = Number(raw);
   if (!Number.isInteger(value) || value <= 0) {
@@ -12,8 +12,12 @@ function positiveInteger(name, fallback) {
   return value;
 }
 
-function absoluteHttpUrl(name, fallback) {
-  const raw = process.env[name] || fallback;
+function requiredAbsoluteHttpUrl(name, env) {
+  const raw = (env[name] || '').trim();
+  if (!raw) {
+    throw new Error(`${name} is required`);
+  }
+
   let parsed;
   try {
     parsed = new URL(raw);
@@ -32,15 +36,12 @@ function absoluteHttpUrl(name, fallback) {
   return raw.replace(/\/$/, '');
 }
 
-function loadConfig() {
+function loadConfig(env = process.env) {
   return Object.freeze({
-    port: positiveInteger('PORT', 3000),
-    upstreamBaseUrl: absoluteHttpUrl(
-      'UPSTREAM_BASE_URL',
-      'https://jsonplaceholder.typicode.com'
-    ),
-    requestTimeoutMs: positiveInteger('REQUEST_TIMEOUT_MS', 8_000),
-    runId: (process.env.TEST_RUN_ID || '').trim() || randomUUID(),
+    port: positiveInteger('PORT', 3000, env),
+    upstreamBaseUrl: requiredAbsoluteHttpUrl('UPSTREAM_BASE_URL', env),
+    requestTimeoutMs: positiveInteger('REQUEST_TIMEOUT_MS', 8_000, env),
+    runId: (env.TEST_RUN_ID || '').trim() || randomUUID(),
   });
 }
 
