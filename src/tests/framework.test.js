@@ -65,14 +65,14 @@ describe('framework contracts', () => {
       PORT: '4100',
       UPSTREAM_BASE_URL: 'https://api.example.test/v1/',
       REQUEST_TIMEOUT_MS: '2500',
-      TEST_RUN_ID: 'config-contract',
+      TEST_RUN_ID: ' config:contract-42 ',
     });
 
     expect(config).toEqual({
       port: 4100,
       upstreamBaseUrl: 'https://api.example.test/v1',
       requestTimeoutMs: 2500,
-      runId: 'config-contract',
+      runId: 'config:contract-42',
     });
     expect(Object.isFrozen(config)).toBe(true);
   });
@@ -80,9 +80,13 @@ describe('framework contracts', () => {
   test.each([
     ['REQUEST_TIMEOUT_MS', '0'],
     ['UPSTREAM_BASE_URL', 'localhost:8080'],
+    ['UPSTREAM_BASE_URL', 'https://:443'],
     ['UPSTREAM_BASE_URL', 'https://user:password@example.test'],
     ['UPSTREAM_BASE_URL', 'https://example.test/api?access_token=secret'],
     ['UPSTREAM_BASE_URL', 'https://example.test/api#fragment'],
+    ['TEST_RUN_ID', 'unsafe run id'],
+    ['TEST_RUN_ID', 'line-break\nheader'],
+    ['TEST_RUN_ID', 'x'.repeat(129)],
   ])('invalid %s configuration fails before server startup', (name, value) => {
     expect(() =>
       loadConfig({
