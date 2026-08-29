@@ -12,12 +12,7 @@ async function main() {
     },
   };
 
-  const config = {
-    upstreamBaseUrl: 'https://example.invalid',
-    requestTimeoutMs: 1_000,
-    runId: 'live-smoke',
-  };
-  const app = createApp({ postsClient, config });
+  const app = createApp({ postsClient });
   const server = app.listen(0, '127.0.0.1');
 
   try {
