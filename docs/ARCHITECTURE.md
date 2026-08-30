@@ -29,17 +29,17 @@ flowchart LR
 
 `src/config.js` validates runtime inputs before server startup. `loadConfig(env)` accepts an injected read-only environment map for deterministic configuration contracts and defaults to `process.env` only at the real runtime boundary.
 
-`UPSTREAM_BASE_URL` is required. It must be an absolute HTTP(S) URL with a hostname and without credentials, query strings, or fragments. Optional path prefixes remain valid. Request timeout and port values must be positive integers.
+`UPSTREAM_BASE_URL` is required. It must be an absolute HTTP(S) URL with a hostname, a usable port in `1..65535` when one is explicit, and no credentials, query string, or fragment. Optional path prefixes remain valid. `PORT` is independently constrained to `1..65535`; request timeout must be a positive integer.
 
 Supplied `TEST_RUN_ID` values are normalized through the shared correlation-token policy and limited to 1–128 ASCII letters, digits, dots, underscores, colons, or hyphens. Missing run identity receives a generated UUID.
 
-There is no public-provider fallback. Missing upstream ownership is a configuration error before the server binds a port or Axios opens transport.
+There is no public-provider fallback. Missing or unusable upstream ownership is a configuration error before the server binds a port or Axios opens transport.
 
 The framework does not encode credentials in upstream URLs. Authentication, if added later, belongs in a controlled transport-header/interceptor policy.
 
 ## Request and run correlation
 
-`requestContext` establishes one request ID for each inbound request and returns it in `x-request-id` as well as stable JSON error envelopes. Unsafe or oversized inbound request IDs are replaced by a bounded generated UUID.
+`requestContext` establishes one request ID for each inbound request and returns it in `x-request-id` as well as stable JSON error envelopes. Unsafe or oversized inbound request IDs are replaced by a bounded generated UUID. The request-ID and run-ID surfaces share one correlation-token syntax contract so their limits cannot silently drift.
 
 `apiAgent()` deliberately separates the two correlation dimensions:
 
@@ -124,7 +124,7 @@ This ensures local untracked material cannot be copied into the image merely bec
 New behavior should preserve these boundaries:
 
 - require explicit external-target ownership before server startup;
-- validate runtime configuration and correlation tokens before transport or listener side effects;
+- validate runtime configuration, port ranges, and correlation tokens before transport or listener side effects;
 - inject external dependencies at client/domain seams;
 - test routes in-process with Supertest;
 - keep run correlation distinct from per-request identity;
