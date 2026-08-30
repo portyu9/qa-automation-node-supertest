@@ -83,6 +83,7 @@ describe('framework contracts', () => {
     ['REQUEST_TIMEOUT_MS', '0'],
     ['UPSTREAM_BASE_URL', 'localhost:8080'],
     ['UPSTREAM_BASE_URL', 'https://:443'],
+    ['UPSTREAM_BASE_URL', 'https://example.test:0/api'],
     ['UPSTREAM_BASE_URL', 'https://user:password@example.test'],
     ['UPSTREAM_BASE_URL', 'https://example.test/api?access_token=secret'],
     ['UPSTREAM_BASE_URL', 'https://example.test/api#fragment'],
