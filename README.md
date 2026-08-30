@@ -98,22 +98,18 @@ flowchart LR
 
 ```text
 .
-├── src/
-│   ├── app.js
-│   ├── server.js
-│   ├── config.js
-│   ├── clients/{postsUpstreamClient.js,upstreamError.js}
-│   ├── contracts/
-│   ├── middleware/
-│   ├── routes/
-│   ├── testing/{apiAgent.js,expectations.js}
-│   └── tests/supertestCapabilities.test.js
-├── scripts/live-smoke.js
-├── docs/{ARCHITECTURE.md,DEPENDENCY_BOUNDARIES.md,TEST_STRATEGY.md}
-├── .github/workflows/{ci,docs,extended,security}.yml
-├── jest.config.js
-├── package.json
-└── package-lock.json
+├── .github/
+│   ├── scripts/
+│   └── workflows/
+├── docs/
+├── scripts/
+└── src/
+    ├── clients/
+    ├── contracts/
+    ├── middleware/
+    ├── routes/
+    ├── testing/
+    └── tests/
 ```
 
 ## Quick start
