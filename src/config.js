@@ -35,6 +35,9 @@ function requiredAbsoluteHttpUrl(name, env) {
   if (!['http:', 'https:'].includes(parsed.protocol) || !parsed.hostname) {
     throw new Error(`${name} must use http or https with a hostname`);
   }
+  if (parsed.port === '0') {
+    throw new Error(`${name} port must be between 1 and 65535`);
+  }
   if (parsed.username || parsed.password) {
     throw new Error(`${name} must not contain URL credentials`);
   }
