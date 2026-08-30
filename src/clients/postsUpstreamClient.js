@@ -17,8 +17,11 @@ function validateBaseUrl(baseURL) {
     throw new Error('baseURL must be an absolute URL');
   }
 
-  if (!['http:', 'https:'].includes(parsed.protocol)) {
-    throw new Error('baseURL must use http or https');
+  if (!['http:', 'https:'].includes(parsed.protocol) || !parsed.hostname) {
+    throw new Error('baseURL must use http or https with a hostname');
+  }
+  if (parsed.port === '0') {
+    throw new Error('baseURL port must be between 1 and 65535');
   }
   if (parsed.username || parsed.password) {
     throw new Error('baseURL must not contain URL credentials');
@@ -27,7 +30,7 @@ function validateBaseUrl(baseURL) {
     throw new Error('baseURL must not contain a query string or fragment');
   }
 
-  return baseURL.replace(/\/$/, '');
+  return baseURL.trim().replace(/\/$/, '');
 }
 
 /**
