@@ -63,7 +63,7 @@ describe('framework contracts', () => {
   test('runtime configuration is parsed from an injected read-only environment', () => {
     const config = loadConfig({
       PORT: '4100',
-      UPSTREAM_BASE_URL: 'https://api.example.test/v1/',
+      UPSTREAM_BASE_URL: '  HTTPS://API.EXAMPLE.TEST:443/v1/  ',
       REQUEST_TIMEOUT_MS: '2500',
       TEST_RUN_ID: ' config:contract-42 ',
     });
@@ -87,6 +87,7 @@ describe('framework contracts', () => {
     ['UPSTREAM_BASE_URL', 'https://user:password@example.test'],
     ['UPSTREAM_BASE_URL', 'https://example.test/api?access_token=secret'],
     ['UPSTREAM_BASE_URL', 'https://example.test/api#fragment'],
+    ['UPSTREAM_BASE_URL', 'https://example.test/api\nadmin'],
     ['TEST_RUN_ID', 'unsafe run id'],
     ['TEST_RUN_ID', 'line-break\nheader'],
     ['TEST_RUN_ID', 'x'.repeat(129)],
