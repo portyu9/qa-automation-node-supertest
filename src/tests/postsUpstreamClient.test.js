@@ -10,13 +10,13 @@ describe('PostsUpstreamClient transport contract', () => {
     axios.create.mockReset();
   });
 
-  test('applies the configured base URL and timeout to Axios', async () => {
+  test('normalizes and applies the configured base URL and timeout to Axios', async () => {
     const transport = {
       get: jest.fn().mockResolvedValue({ data: [] }),
     };
     axios.create.mockReturnValue(transport);
 
-    const client = new PostsUpstreamClient('https://api.example.test/', {
+    const client = new PostsUpstreamClient('  https://api.example.test/  ', {
       timeoutMs: 2_500,
     });
 
@@ -36,6 +36,8 @@ describe('PostsUpstreamClient transport contract', () => {
     '',
     'localhost:8080',
     'ftp://example.test',
+    'https://:443',
+    'https://example.test:0/api',
     'https://user:password@example.test',
     'https://example.test/api?token=secret',
     'https://example.test/api#fragment',
