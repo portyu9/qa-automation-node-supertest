@@ -104,5 +104,6 @@ describe('Supertest transport capability contracts', () => {
 
     await client.request('HEAD', '/resource').expect(204).expect('x-resource-version', '1');
     await client.options('/resource').expect(204).expect('allow', 'HEAD, OPTIONS');
+    expect(() => client.request('constructor', '/resource')).toThrow('unsupported HTTP method');
   });
 });
