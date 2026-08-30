@@ -1,6 +1,7 @@
 'use strict';
 
 const { correlationToken } = require('./correlation');
+const { normalizeAbsoluteHttpUrl } = require('./urlPolicy');
 
 function positiveInteger(name, fallback, env) {
   const raw = env[name];
@@ -20,37 +21,10 @@ function tcpPort(name, fallback, env) {
   return value;
 }
 
-function requiredAbsoluteHttpUrl(name, env) {
-  const raw = String(env[name] || '').trim();
-  if (!raw) {
-    throw new Error(`${name} is required`);
-  }
-
-  let parsed;
-  try {
-    parsed = new URL(raw);
-  } catch {
-    throw new Error(`${name} must be an absolute URL`);
-  }
-  if (!['http:', 'https:'].includes(parsed.protocol) || !parsed.hostname) {
-    throw new Error(`${name} must use http or https with a hostname`);
-  }
-  if (parsed.port === '0') {
-    throw new Error(`${name} port must be between 1 and 65535`);
-  }
-  if (parsed.username || parsed.password) {
-    throw new Error(`${name} must not contain URL credentials`);
-  }
-  if (parsed.search || parsed.hash) {
-    throw new Error(`${name} must not contain a query string or fragment`);
-  }
-  return raw.replace(/\/$/, '');
-}
-
 function loadConfig(env = process.env) {
   return Object.freeze({
     port: tcpPort('PORT', 3000, env),
-    upstreamBaseUrl: requiredAbsoluteHttpUrl('UPSTREAM_BASE_URL', env),
+    upstreamBaseUrl: normalizeAbsoluteHttpUrl(env.UPSTREAM_BASE_URL, 'UPSTREAM_BASE_URL'),
     requestTimeoutMs: positiveInteger('REQUEST_TIMEOUT_MS', 8_000, env),
     runId: correlationToken('TEST_RUN_ID', env.TEST_RUN_ID),
   });
