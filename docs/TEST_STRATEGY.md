@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The suite is designed so request behavior, dependency transport, consumer contracts, and packaged execution can fail independently. Deterministic component tests are the primary service gate; live external availability is not required to prove route/error semantics.
+The suite is designed so request behavior, dependency transport, consumer contracts, packaged execution, and security controls can fail independently. Deterministic component tests are the primary service gate; live external availability is not required to prove route/error semantics.
 
 ## Layer model
 
@@ -13,6 +13,9 @@ The suite is designed so request behavior, dependency transport, consumer contra
 | Transport contract | Jest with Axios double | No | Explicit base URL, timeout, resource mapping, normalized transport failures |
 | Consumer contract | Pact | Local generated provider | Consumer/provider HTTP expectations |
 | Packaged execution | Docker + `npm test` | No | Dockerfile build, non-root execution, writable test evidence |
+| Repository security | CodeQL + Trivy | Tool registries only | SAST, dependency/configuration/secret risk |
+| Container security | Docker + Trivy | Tool registries only | Vulnerability exposure in the built image |
+| Dependency change | GitHub Dependency Review | GitHub service | Newly introduced dependency risk when Dependency graph is available |
 | Live provider | Optional integration | Yes | Environment/provider compatibility |
 
 ## Configuration-negative tests
@@ -98,7 +101,20 @@ The container gate must prove:
 - Pact evidence can be written without root privileges;
 - `.dockerignore` prevents local `.env`, `node_modules`, reports, Pact output, Git metadata, logs, and editor state from entering the build context.
 
-Docker base-image updates are managed separately by Dependabot. Major Node runtime changes remain deliberate compatibility decisions even when their generated PR checks pass.
+The security workflow separately scans the **built image** for fixed HIGH/CRITICAL vulnerabilities so a successful build is not mistaken for supply-chain safety.
+
+Docker base-image updates are managed separately by Dependabot. Minor/patch maintenance stays within the supported Node major. Major Node runtime changes remain deliberate compatibility decisions even when their generated PR checks pass: the CI matrix, supported-runtime documentation, and packaged base must move together.
+
+## Security strategy
+
+Security signals remain independent from application-test retries and coverage:
+
+- CodeQL performs JavaScript/TypeScript SAST with the extended query suite;
+- Trivy scans the repository filesystem for fixed HIGH/CRITICAL dependency findings, supported HIGH/CRITICAL misconfiguration findings, and committed secret findings;
+- Trivy scans the built application image for fixed HIGH/CRITICAL vulnerabilities in the packaged runtime/dependency surface;
+- GitHub Dependency Review evaluates pull-request dependency deltas when the repository Dependency graph is available.
+
+If GitHub Dependency graph is unavailable, the workflow must record that limitation. Repository and container-image Trivy scans remain required whole-repository controls, but they are not presented as equivalent to diff-aware Dependency Review.
 
 ## Coverage policy
 
@@ -109,6 +125,8 @@ Jest collects coverage from application/framework code while excluding the execu
 Automatic server error logs are allowlisted and exclude bodies/authorization data. Test failures should first use Jest/Supertest assertion output and request/run correlation identifiers.
 
 Do not make assertions against unstable raw exception text unless the text itself is a contract. Public API tests should prefer stable error codes/statuses.
+
+Security evidence is retained separately from application evidence so vulnerability/configuration findings do not become mixed with behavioral test artifacts.
 
 ## Parallelism and lifecycle
 
@@ -128,6 +146,9 @@ Any future stateful database/cache dependency requires per-test or transaction-s
 | Transport normalization | Client/library-boundary defect |
 | Pact | Consumer/provider expectation mismatch |
 | Container build/entrypoint | Packaging, permissions, dependency image, or test-runtime defect |
+| Repository security | Source/dependency/configuration/secret risk |
+| Container security | Base-image or packaged dependency vulnerability |
+| Dependency Review | Newly introduced dependency risk or unavailable GitHub Dependency graph |
 | Live provider | Environment/provider issue until deterministic layers disagree |
 | Open-handle warning | Lifecycle cleanup defect |
 
@@ -143,7 +164,10 @@ A service/framework change is ready when:
 - provider-neutral transport-client contracts pass;
 - consumer contracts pass when changed;
 - the tracked container builds and runs tests non-root;
+- CodeQL, repository Trivy, and built-image Trivy gates pass;
+- pull-request Dependency Review passes when GitHub Dependency graph is available, or its service limitation is explicitly recorded while independent Trivy gates remain successful;
+- any Node major runtime change is reflected consistently in CI, container, and documentation rather than being adopted by an isolated image update;
 - no live dependency is required for the ordinary component gate;
 - server startup cannot silently select a public provider;
 - logs/public responses remain free of raw secret-bearing dependency context;
-- documentation reflects any changed boundary or public error semantics.
+- documentation reflects any changed boundary, support policy, or public error semantics.
