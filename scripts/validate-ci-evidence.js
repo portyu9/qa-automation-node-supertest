@@ -16,12 +16,18 @@ function readJson(file) {
 }
 
 const jest = readJson(path.join('reports', 'jest-results.json'));
+const total = Number(jest.numTotalTests);
 const passed = Number(jest.numPassedTests);
 const failed = Number(jest.numFailedTests);
 const pending = Number(jest.numPendingTests ?? 0);
 const todo = Number(jest.numTodoTests ?? 0);
-if (![passed, failed, pending, todo].every(Number.isInteger)) {
+if (![total, passed, failed, pending, todo].every(Number.isInteger)) {
   throw new Error('Jest evidence is missing integer test-count metadata');
+}
+if (total !== passed + failed + pending + todo) {
+  throw new Error(
+    `Jest test counts do not reconcile: total=${total}, passed=${passed}, failed=${failed}, pending=${pending}, todo=${todo}`
+  );
 }
 const executed = passed + failed;
 if (executed < MINIMUM_EXECUTED_TESTS) {
@@ -29,14 +35,26 @@ if (executed < MINIMUM_EXECUTED_TESTS) {
     `Jest evidence contains only ${executed} executed tests; minimum is ${MINIMUM_EXECUTED_TESTS} (pending=${pending}, todo=${todo})`
   );
 }
-if (failed !== 0 || passed <= 0) {
-  throw new Error(`Jest evidence is not a clean executed run: passed=${passed}, failed=${failed}`);
+if (failed !== 0 || passed <= 0 || Number(jest.numFailedTestSuites ?? 0) !== 0) {
+  throw new Error(
+    `Jest evidence is not a clean executed run: passed=${passed}, failed=${failed}, failedSuites=${jest.numFailedTestSuites ?? 'missing'}`
+  );
 }
 
 const coverage = readJson(path.join('coverage', 'coverage-summary.json'));
-const lines = coverage.total?.lines;
-if (!lines || Number(lines.total) <= 0 || Number(lines.covered) <= 0) {
-  throw new Error('coverage evidence contains no measured source lines');
+const coverageMetrics = ['lines', 'statements', 'functions', 'branches'];
+for (const metric of coverageMetrics) {
+  const value = coverage.total?.[metric];
+  if (!value || !Number.isInteger(Number(value.total)) || Number(value.total) <= 0) {
+    throw new Error(`coverage evidence contains no measured ${metric}`);
+  }
+  if (
+    !Number.isInteger(Number(value.covered)) ||
+    Number(value.covered) < 0 ||
+    Number(value.covered) > Number(value.total)
+  ) {
+    throw new Error(`coverage evidence contains invalid ${metric} covered/total values`);
+  }
 }
 
 let pactFiles;
@@ -59,5 +77,5 @@ for (const file of pactFiles) {
   interactions += pact.interactions.length;
 }
 console.log(
-  `validated CI evidence: executedTests=${executed}, pending=${pending}, todo=${todo}, coveredLines=${lines.covered}/${lines.total}, pactInteractions=${interactions}`
+  `validated CI evidence: executedTests=${executed}, pending=${pending}, todo=${todo}, coveredLines=${coverage.total.lines.covered}/${coverage.total.lines.total}, coveredBranches=${coverage.total.branches.covered}/${coverage.total.branches.total}, pactInteractions=${interactions}`
 );
