@@ -19,7 +19,7 @@
 A deterministic API quality-engineering framework built with **Express 5, Supertest, Jest, Axios, and Pact**. Fast component tests execute the real Express application in-process; external transport is isolated behind a provider-neutral client; Pact owns consumer compatibility; a separate loopback listener contract verifies real TCP/middleware/serialization behavior; and native Supertest agents/expectations remain available for stateful protocol contracts.
 
 > [!IMPORTANT]
-> Application behavior, in-process HTTP behavior, dependency transport behavior, contract compatibility, listener behavior, and deployed-environment behavior are different failure domains. The framework keeps those boundaries separate so a failing test answers **what broke** before it asks **where the stack trace ended**.
+> Application behavior, in-process HTTP behavior, dependency transport behavior, contract compatibility, listener behavior, packaged-runtime behavior, and deployed-environment behavior are different failure domains. The framework keeps those boundaries separate so a failing test answers **what broke** before it asks **where the stack trace ended**.
 
 **Read by intent:** [capabilities](#capability-map) · [architecture](#architecture) · [quick start](#quick-start) · [native Supertest surface](#native-supertest-protocol-surface) · [failure taxonomy](#stable-public-failure-taxonomy) · [correlation](#request-correlation) · [dependencies](#dependency-maintenance) · [triage](#failure-triage)
 
@@ -33,7 +33,7 @@ A deterministic API quality-engineering framework built with **Express 5, Supert
 | Contract | Consumer/provider HTTP expectations | Pact mock provider | Pact artifacts |
 | Listener | Real Node TCP + serialization + correlation | Ephemeral loopback + injected dependency | Local smoke summary |
 | External integration | Real dependency behavior | Explicit `UPSTREAM_BASE_URL` | Separate environment signal |
-| Security | Dependency/configuration exposure | Trivy filesystem scan | JSON + Markdown findings |
+| Security | JavaScript SAST, dependency/configuration/secret risk, built-image vulnerability risk, and PR dependency-change risk | CodeQL + Trivy repository/image scans + Dependency Review when GitHub Dependency graph is available | CodeQL result, Trivy JSON, dependency-review status |
 | Documentation | README/workflow/governance consistency | Repository-local validator | Actions status |
 
 ## Architecture
@@ -77,7 +77,9 @@ flowchart LR
 | Response policy | Reusable `.expect(fn)` helpers validate JSON/header/body contracts without replacing native `.expect()`. |
 | Listener coverage | Real socket behavior is tested on `127.0.0.1:0` with a deterministic injected dependency. |
 | Logging | Shared diagnostics use safe metadata, not request bodies/auth values. |
-| Reproducibility | Node 22/24, committed lockfile, `npm ci`. |
+| Reproducibility | Node 22/24, committed lockfile, `npm ci`, and a digest-pinned Node 24 container base define the supported toolchain. |
+| Container runtime | A major Node base-image change is a deliberate support-matrix decision; scheduled Docker maintenance stays within the supported major. |
+| Security | Code scanning, repository/dependency scanning, built-image scanning, and dependency-diff review are independent controls with different evidence and service requirements. |
 
 ## Boundary decision guide
 
@@ -215,19 +217,21 @@ Pact remains a distinct compatibility plane. A Pact failure is provider/consumer
 
 Shared error diagnostics deliberately retain only bounded metadata such as request ID, public error code/status, and error class. Authorization values, cookies, request bodies, upstream bodies, and raw Axios configuration are excluded.
 
-`security.yml` runs Trivy as an independent repository gate. Security failures are not application-test flakiness and must not be “fixed” by retries or coverage exclusions.
+`security.yml` runs four independent control planes: CodeQL JavaScript/TypeScript SAST; Trivy HIGH/CRITICAL repository dependency/configuration/secret scanning; Trivy HIGH/CRITICAL scanning of the built container image; and pull-request Dependency Review when GitHub Dependency graph is available. If the graph service is unavailable, the workflow records that limitation and the repository/image Trivy jobs remain required, but they are not represented as equivalent to change-aware dependency-diff analysis.
 
 ## Dependency maintenance
 
-Dependabot maintains **npm** and **GitHub Actions**.
+Dependabot maintains **npm**, **Docker**, and **GitHub Actions**.
 
 - weekly Monday 09:00 America/New_York;
 - grouped minor/patch updates for manageable review volume;
-- standalone majors for attributable Express/Jest/Axios/Pact/Node compatibility review;
-- Actions treated as executable supply-chain dependencies;
-- every dependency PR must clear component, contract, listener, security, and documentation gates as applicable.
+- standalone npm majors for attributable Express/Jest/Axios/Pact compatibility review;
+- Docker minor/patch updates maintain the digest-pinned Node image within the supported runtime major;
+- Node base-image major updates are ignored by scheduled version maintenance until the repository intentionally expands its Node support matrix and corresponding CI/documentation;
+- Actions are treated as executable supply-chain dependencies;
+- every dependency PR must clear component, contract, listener, container, security, and documentation gates as applicable.
 
-Automation proposes a change; test evidence and release-impact review decide whether it is safe.
+Automation proposes a change; test evidence, support-policy fit, and release-impact review decide whether it is safe. A green container test alone does not silently redefine the supported runtime matrix.
 
 ## Failure triage
 
@@ -239,6 +243,8 @@ Automation proposes a change; test evidence and release-impact review decide whe
 | Transport unit failure | Client policy/error normalization |
 | Pact failure | Consumer/provider compatibility |
 | Listener-only failure | TCP/runtime/serialization lifecycle |
+| Container build/entrypoint | Packaging/runtime compatibility |
+| Container security | Base-image or packaged dependency vulnerability |
 | `502` / `504` contract mismatch | Dependency failure semantics |
 | External-target-only failure | Environment/dependency integration |
 | Security/docs | Independent repository governance |
@@ -262,4 +268,4 @@ Automation proposes a change; test evidence and release-impact review decide whe
 - [`docs/DEPENDENCY_BOUNDARIES.md`](docs/DEPENDENCY_BOUNDARIES.md) — dependency ownership and failure normalization.
 - [`docs/TEST_STRATEGY.md`](docs/TEST_STRATEGY.md) — layer selection and exit criteria.
 
-A strong Supertest framework makes the failed boundary obvious: **application behavior, stateful in-process HTTP semantics, input policy, transport normalization, compatibility, listener runtime, or explicit external dependency**.
+A strong Supertest framework makes the failed boundary obvious: **application behavior, stateful in-process HTTP semantics, input policy, transport normalization, compatibility, listener runtime, packaged runtime, or explicit external dependency**.
