@@ -77,7 +77,7 @@ flowchart LR
 | Response policy | Reusable `.expect(fn)` helpers validate JSON/header/body contracts without replacing native `.expect()`. |
 | Listener coverage | Real socket behavior is tested on `127.0.0.1:0` with a deterministic injected dependency. |
 | Logging | Shared diagnostics use safe metadata, not request bodies/auth values. |
-| Reproducibility | Node 22/24, committed lockfile, `npm ci`, and a digest-pinned Node 24 container base define the supported toolchain. |
+| Reproducibility | Node 22/24, npm 11.19.1, a committed lockfile, lifecycle-script-disabled `npm ci`, and a digest-pinned Node 24 container base define the CI-qualified toolchain. |
 | Container runtime | A major Node base-image change is a deliberate support-matrix decision; scheduled Docker maintenance stays within the supported major. |
 | Security | Code scanning, repository/dependency scanning, built-image scanning, and dependency-diff review are independent controls with different evidence and service requirements. |
 
@@ -117,7 +117,7 @@ flowchart LR
 ## Quick start
 
 ```bash
-npm ci
+npm ci --ignore-scripts
 npm run check
 npm run test:coverage
 python .github/scripts/validate_readme.py
@@ -229,7 +229,7 @@ Dependabot maintains **npm**, **Docker**, and **GitHub Actions**.
 - Docker minor/patch updates maintain the digest-pinned Node image within the supported runtime major;
 - Node base-image major updates are ignored by scheduled version maintenance until the repository intentionally expands its Node support matrix and corresponding CI/documentation;
 - Actions are treated as executable supply-chain dependencies;
-- every dependency PR must clear component, contract, listener, container, security, and documentation gates as applicable.
+- dependency PRs are evaluated by component, contract, listener, container, security, and documentation workflows as applicable.
 
 Automation proposes a change; test evidence, support-policy fit, and release-impact review decide whether it is safe. A green container test alone does not silently redefine the supported runtime matrix.
 

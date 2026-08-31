@@ -38,10 +38,14 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
           cache-dependency-path: package-lock.json
-      - run: npm ci --no-audit --no-fund
+      - name: Pin npm toolchain
+        run: npm install --global npm@11.19.1 --no-audit --no-fund
+      - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm run check
       - name: Exercise real local TCP listener with deterministic dependency
         run: npm run test:live-smoke
+      - name: Validate meaningful listener evidence
+        run: node scripts/validate-listener-evidence.js
       - name: Publish listener observability summary
         if: always()
         run: |
@@ -53,7 +57,9 @@ jobs:
             echo "- Transport: \`127.0.0.1\` ephemeral TCP listener"
             echo "- Upstream: injected deterministic client (no external network)"
             echo "- Job status: \`${{ job.status }}\`"
-            echo "- Coverage intent: listener + middleware + correlation + routing + serialization"
+            echo '- Dependencies: npm 11.19.1 + lockfile, lifecycle scripts disabled'
+            echo '- Evidence: validated listener manifest + CI summary'
+            echo '- Coverage intent: listener + middleware + correlation + routing + serialization'
           } | tee "reports/listener-node-${{ matrix.node }}.md" >> "$GITHUB_STEP_SUMMARY"
       - name: Upload extended evidence
         if: always()
@@ -61,5 +67,5 @@ jobs:
         with:
           name: supertest-listener-node-${{ matrix.node }}-evidence
           path: reports/
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 14
