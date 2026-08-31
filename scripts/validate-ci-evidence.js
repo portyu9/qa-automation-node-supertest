@@ -2,8 +2,15 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 function readJson(file) {
-  if (!fs.existsSync(file) || fs.statSync(file).size === 0) throw new Error(`missing or empty evidence: ${file}`);
-  return JSON.parse(fs.readFileSync(file, 'utf8'));
+  let content;
+  try {
+    content = fs.readFileSync(file, 'utf8');
+  } catch (error) {
+    if (error && error.code === 'ENOENT') throw new Error(`missing evidence: ${file}`);
+    throw error;
+  }
+  if (content.length === 0) throw new Error(`empty evidence: ${file}`);
+  return JSON.parse(content);
 }
 
 const jest = readJson(path.join('reports', 'jest-results.json'));
@@ -14,7 +21,15 @@ const coverage = readJson(path.join('coverage', 'coverage-summary.json'));
 const lines = coverage.total?.lines;
 if (!lines || Number(lines.total) <= 0 || Number(lines.covered) <= 0) throw new Error('coverage evidence contains no measured source lines');
 
-const pactFiles = fs.existsSync('pacts') ? fs.readdirSync('pacts').filter((name) => name.endsWith('.json')) : [];
+let pactFiles;
+try {
+  pactFiles = fs.readdirSync('pacts', { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+    .map((entry) => entry.name);
+} catch (error) {
+  if (error && error.code === 'ENOENT') throw new Error('no Pact artifact directory was generated');
+  throw error;
+}
 if (pactFiles.length === 0) throw new Error('no Pact artifact was generated');
 let interactions = 0;
 for (const file of pactFiles) {
