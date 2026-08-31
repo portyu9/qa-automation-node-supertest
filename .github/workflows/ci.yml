@@ -15,6 +15,7 @@ concurrency:
 
 env:
   TEST_RUN_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
+  NPM_VERSION: 11.19.1
 
 jobs:
   test:
@@ -32,7 +33,11 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Pin npm toolchain
-        run: npm install --global npm@11.19.1 --no-audit --no-fund
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global --ignore-scripts "npm@${NPM_VERSION}" --no-audit --no-fund
+          [[ "$(npm --version)" == "$NPM_VERSION" ]]
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm run check
       - name: Run Jest coverage and emit machine-readable results
@@ -55,7 +60,7 @@ jobs:
             schemaVersion: 1,
             framework: 'jest-supertest-pact',
             runId: process.env.TEST_RUN_ID,
-            dimension: { node: nodeVersion },
+            dimension: { node: nodeVersion, npm: process.env.NPM_VERSION },
             status: process.env.JOB_STATUS,
             sha: process.env.GITHUB_SHA,
             ref: process.env.GITHUB_REF,
@@ -67,8 +72,9 @@ jobs:
             echo
             echo "- Run ID: \`${TEST_RUN_ID}\`"
             echo "- Job status: \`${JOB_STATUS}\`"
-            echo '- Dependencies: npm 11.19.1 + lockfile, lifecycle scripts disabled'
-            echo '- Evidence: validated Jest JSON + coverage + Pact artifacts + CI observability envelope'
+            echo "- npm: \`${NPM_VERSION}\`"
+            echo '- Dependencies: exact npm qualification + lockfile, lifecycle scripts disabled'
+            echo '- Evidence: at least 60 executed Jest tests + coverage + Pact artifacts + CI observability envelope'
           } | tee "reports/ci-summary-node-${{ matrix.node }}.md" >> "$GITHUB_STEP_SUMMARY"
       - name: Upload coverage and contract evidence
         if: always()
@@ -92,3 +98,20 @@ jobs:
         run: docker build -t qa-supertest:ci .
       - name: Validate packaged test entrypoint
         run: docker run --rm qa-supertest:ci
+
+  ci-gate:
+    name: ci-gate
+    if: always()
+    needs: [test, container]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Evaluate required CI jobs
+        env:
+          TEST: ${{ needs.test.result }}
+          CONTAINER: ${{ needs.container.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TEST" == "success" ]] || { echo "test=$TEST"; exit 1; }
+          [[ "$CONTAINER" == "success" ]] || { echo "container=$CONTAINER"; exit 1; }
