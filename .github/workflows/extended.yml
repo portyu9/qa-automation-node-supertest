@@ -21,6 +21,9 @@ concurrency:
   group: supertest-extended-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  NPM_VERSION: 11.19.1
+
 jobs:
   listener-contract:
     runs-on: ubuntu-24.04
@@ -39,7 +42,11 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Pin npm toolchain
-        run: npm install --global npm@11.19.1 --no-audit --no-fund
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global --ignore-scripts "npm@${NPM_VERSION}" --no-audit --no-fund
+          [[ "$(npm --version)" == "$NPM_VERSION" ]]
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm run check
       - name: Exercise real local TCP listener with deterministic dependency
@@ -57,7 +64,8 @@ jobs:
             echo "- Transport: \`127.0.0.1\` ephemeral TCP listener"
             echo "- Upstream: injected deterministic client (no external network)"
             echo "- Job status: \`${{ job.status }}\`"
-            echo '- Dependencies: npm 11.19.1 + lockfile, lifecycle scripts disabled'
+            echo "- npm: \`${NPM_VERSION}\`"
+            echo '- Dependencies: exact npm qualification + lockfile, lifecycle scripts disabled'
             echo '- Evidence: validated listener manifest + CI summary'
             echo '- Coverage intent: listener + middleware + correlation + routing + serialization'
           } | tee "reports/listener-node-${{ matrix.node }}.md" >> "$GITHUB_STEP_SUMMARY"
@@ -69,3 +77,18 @@ jobs:
           path: reports/
           if-no-files-found: error
           retention-days: 14
+
+  extended-gate:
+    name: extended-gate
+    if: always()
+    needs: [listener-contract]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Evaluate listener compatibility matrix
+        env:
+          LISTENER: ${{ needs.listener-contract.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$LISTENER" == "success" ]] || { echo "listener-contract=$LISTENER"; exit 1; }

@@ -15,6 +15,9 @@ concurrency:
   group: security-${{ github.repository }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  NPM_VERSION: 11.19.1
+
 jobs:
   codeql:
     name: CodeQL
@@ -35,6 +38,71 @@ jobs:
           queries: security-extended
       - name: Analyze
         uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+
+  npm-audit:
+    name: npm audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Pin npm toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global --ignore-scripts "npm@${NPM_VERSION}" --no-audit --no-fund
+          [[ "$(npm --version)" == "$NPM_VERSION" ]]
+      - name: Audit committed dependency graph at HIGH/CRITICAL severity
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reports/security/npm
+          set +e
+          npm audit --audit-level=high --json > reports/security/npm/audit.json
+          audit_status=$?
+          set -e
+          AUDIT_STATUS="$audit_status" node - <<'NODE'
+          const fs = require('node:fs');
+          const path = 'reports/security/npm/audit.json';
+          if (!fs.existsSync(path) || fs.statSync(path).size === 0) {
+            throw new Error('npm audit did not produce JSON evidence');
+          }
+          const report = JSON.parse(fs.readFileSync(path, 'utf8'));
+          const counts = report.metadata?.vulnerabilities;
+          if (!counts) throw new Error('npm audit JSON is missing vulnerability metadata');
+          const summary = [
+            '### npm advisory gate',
+            '',
+            `- npm: \`${process.env.NPM_VERSION}\``,
+            '',
+            '| Severity | Findings |',
+            '| --- | ---: |',
+            `| Critical | ${counts.critical ?? 0} |`,
+            `| High | ${counts.high ?? 0} |`,
+            `| Moderate | ${counts.moderate ?? 0} |`,
+            `| Low | ${counts.low ?? 0} |`,
+            '',
+            '- Policy: HIGH/CRITICAL advisories fail the job.',
+            '- Scope: committed npm lock graph, including framework development dependencies.',
+            '',
+          ].join('\n');
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
+          NODE
+          exit "$audit_status"
+      - name: Upload npm audit evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-audit-evidence-${{ github.run_id }}
+          path: reports/security/npm/
+          if-no-files-found: error
+          retention-days: 14
 
   trivy:
     name: Trivy repository
@@ -150,12 +218,12 @@ jobs:
             echo 'GitHub Dependency graph is available; running change-aware Dependency Review.'
           else
             echo 'available=false' >> "$GITHUB_OUTPUT"
-            echo '::warning::GitHub Dependency graph is unavailable; repository and built-image Trivy gates remain authoritative, but change-aware Dependency Review cannot run.'
+            echo '::warning::GitHub Dependency graph is unavailable; npm Audit and repository/built-image Trivy gates remain authoritative, but change-aware Dependency Review cannot run.'
             {
               echo '### Dependency Review fallback'
               echo
               echo 'GitHub Dependency graph is unavailable for this repository, so pull-request diff analysis cannot run.'
-              echo 'Independent Trivy jobs still gate the repository and built container image. Enable Dependency graph in repository security settings to add the stronger change-aware review.'
+              echo 'Independent npm Audit and Trivy jobs still gate the committed dependency graph, repository, and built container image. Enable Dependency graph in repository security settings to add the stronger change-aware review.'
             } >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Review dependency changes
@@ -165,4 +233,39 @@ jobs:
           fail-on-severity: high
       - name: Confirm independent fallback gates
         if: steps.dependency-graph.outputs.available != 'true'
-        run: echo 'Dependency Review service unavailable; repository and built-image Trivy jobs remain required independent gates.'
+        run: echo 'Dependency Review service unavailable; npm Audit and repository/built-image Trivy jobs remain independent required gates.'
+
+  security-gate:
+    name: security-gate
+    if: always()
+    needs: [codeql, npm-audit, trivy, container-image, dependency-review]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Evaluate security jobs
+        env:
+          CODEQL: ${{ needs.codeql.result }}
+          NPM_AUDIT: ${{ needs.npm-audit.result }}
+          TRIVY: ${{ needs.trivy.result }}
+          CONTAINER_IMAGE: ${{ needs.container-image.result }}
+          DEPENDENCY_REVIEW: ${{ needs.dependency-review.result }}
+          EVENT: ${{ github.event_name }}
+          SAME_REPOSITORY_PR: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$NPM_AUDIT" == "success" ]] || { echo "npm-audit=$NPM_AUDIT"; exit 1; }
+          [[ "$TRIVY" == "success" ]] || { echo "trivy=$TRIVY"; exit 1; }
+          [[ "$CONTAINER_IMAGE" == "success" ]] || { echo "container-image=$CONTAINER_IMAGE"; exit 1; }
+
+          if [[ "$SAME_REPOSITORY_PR" == "true" ]]; then
+            [[ "$CODEQL" == "success" ]] || { echo "codeql=$CODEQL"; exit 1; }
+          else
+            [[ "$CODEQL" == "skipped" || "$CODEQL" == "success" ]] || { echo "codeql=$CODEQL"; exit 1; }
+          fi
+
+          if [[ "$EVENT" == "pull_request" ]]; then
+            [[ "$DEPENDENCY_REVIEW" == "success" ]] || { echo "dependency-review=$DEPENDENCY_REVIEW"; exit 1; }
+          else
+            [[ "$DEPENDENCY_REVIEW" == "skipped" || "$DEPENDENCY_REVIEW" == "success" ]] || { echo "dependency-review=$DEPENDENCY_REVIEW"; exit 1; }
+          fi
