@@ -95,6 +95,8 @@ The tracked root Dockerfile is validated in required CI rather than assumed corr
 
 The container gate must prove:
 
+- the locked dependency graph installs with dependency lifecycle scripts disabled;
+
 - the Dockerfile builds from the committed context;
 - the image executes the repository's ordinary `npm test` entrypoint;
 - tests run as the non-root `node` user;
@@ -126,7 +128,7 @@ Automatic server error logs are allowlisted and exclude bodies/authorization dat
 
 Do not make assertions against unstable raw exception text unless the text itself is a contract. Public API tests should prefer stable error codes/statuses.
 
-Security evidence is retained separately from application evidence so vulnerability/configuration findings do not become mixed with behavioral test artifacts.
+Security evidence is retained separately from application evidence so vulnerability/configuration findings do not become mixed with behavioral test artifacts. Required CI rejects empty Jest, coverage, Pact, or listener evidence rather than treating artifact-upload success as proof of execution.
 
 ## Parallelism and lifecycle
 
