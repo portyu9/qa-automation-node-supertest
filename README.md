@@ -226,6 +226,23 @@ CI treats execution evidence semantically. The Jest gate derives executed tests 
 
 `security.yml` runs five independent control planes: CodeQL JavaScript/TypeScript SAST; npm HIGH/CRITICAL advisory scanning of the committed lock graph; Trivy HIGH/CRITICAL repository dependency/configuration/secret scanning; Trivy HIGH/CRITICAL scanning of the built container image; and pull-request Dependency Review when GitHub Dependency graph is available. A stable `security-gate` requires the applicable control planes to succeed. If the graph service is unavailable, the workflow records that limitation while npm Audit and both Trivy scopes remain independent gates; none is represented as equivalent to change-aware dependency-diff analysis.
 
+## Confidence boundaries
+
+The framework deliberately separates failure domains because the same HTTP-looking assertion can prove very different things depending on where it executes.
+
+| Signal | Confidence gained | Deliberate limit |
+| --- | --- | --- |
+| In-process Supertest component tests | Express routing, middleware, validation, response envelopes, and injected dependency behavior execute through the real application object | No TCP listener, DNS, TLS, proxy, or deployed-network behavior is involved |
+| Stateful `request.agent(app)` contracts | Cookie/session continuity and native Supertest request composition work for the scenario that explicitly owns state | A shared/global agent would create order dependence; these tests do not prove an external identity system |
+| Injected/mocked Axios transport tests | Timeout, target validation, error normalization, and public failure mapping are deterministic | They prove client policy, not the availability or behavior of a real upstream service |
+| Pact consumer contracts | Consumer-required interactions and payload expectations remain machine-readable and executable | A passing consumer contract does not prove a provider deployment currently satisfies it unless provider verification is also executed |
+| Loopback listener smoke | Real Node listener startup, socket HTTP serialization, middleware/correlation, and shutdown work without an external dependency | Loopback does not exercise public DNS, TLS termination, ingress, service mesh, or remote infrastructure |
+| Packaged-runtime/container gate | The application can be built and exercised in its governed runtime packaging boundary | It does not prove a production orchestrator, autoscaling, networking, or environment configuration |
+| JUnit/coverage/Pact/listener evidence | CI proves intended suites actually executed and produced semantically attributable evidence | Artifact presence alone is not proof; execution counts, identities, and conclusions remain authoritative |
+| CodeQL / npm Audit / Trivy / dependency review | Independent controls inspect source, advisory, repository, image, and dependency-diff risk planes | Scanner success is scoped evidence, not proof that vulnerabilities are absent |
+
+Prefer the **cheapest boundary that introduces the semantics under test**. Adding sockets, contracts, containers, or deployed infrastructure is useful only when those boundaries are part of the requirement being proven.
+
 ## Dependency maintenance
 
 Dependabot maintains **npm**, **Docker**, and **GitHub Actions**.
