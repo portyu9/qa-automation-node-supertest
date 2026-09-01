@@ -125,7 +125,7 @@ jobs:
           format: json
           output: reports/security/trivy.json
           exit-code: "1"
-      - name: Publish repository security summary
+      - name: Require and summarize repository security evidence
         if: always()
         shell: bash
         run: |
@@ -133,9 +133,10 @@ jobs:
           report="reports/security/trivy.json"
           summary="reports/security/summary.md"
           if [[ ! -s "$report" ]]; then
-            printf '### Repository security gate\n\nTrivy did not produce a report. Inspect the scan step for setup/runtime failure.\n' | tee "$summary" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
+            printf '### Repository security gate\n\nTrivy did not produce a report. Treating missing scanner evidence as a gate failure.\n' | tee "$summary" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
+          jq -e '(.Results | type) == "array"' "$report" >/dev/null
           vulnerabilities=$(jq '[.Results[]? | .Vulnerabilities[]?] | length' "$report")
           misconfigurations=$(jq '[.Results[]? | .Misconfigurations[]?] | length' "$report")
           secrets=$(jq '[.Results[]? | .Secrets[]?] | length' "$report")
@@ -150,7 +151,7 @@ jobs:
             echo
             echo '- Scanner: Trivy v0.74.0'
             echo '- Scope: repository filesystem, dependency manifests/locks, supported configuration files, and committed secret material'
-            echo '- Policy: gated findings retain a nonzero scan result; JSON evidence is preserved for triage'
+            echo '- Policy: gated findings retain a nonzero scan result; missing/invalid JSON evidence also fails the job'
           } | tee "$summary" >> "$GITHUB_STEP_SUMMARY"
       - name: Upload repository security evidence
         if: always()
@@ -158,7 +159,7 @@ jobs:
         with:
           name: trivy-repository-evidence-${{ github.run_id }}
           path: reports/security/
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 14
 
   container-image:
@@ -184,13 +185,35 @@ jobs:
           format: json
           output: reports/security/container-image.json
           exit-code: "1"
+      - name: Require and summarize container security evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          report="reports/security/container-image.json"
+          summary="reports/security/container-summary.md"
+          if [[ ! -s "$report" ]]; then
+            printf '### Container security gate\n\nTrivy did not produce image JSON. Treating missing scanner evidence as a gate failure.\n' | tee "$summary" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          jq -e '(.Results | type) == "array"' "$report" >/dev/null
+          vulnerabilities=$(jq '[.Results[]? | .Vulnerabilities[]?] | length' "$report")
+          {
+            echo '### Container security gate'
+            echo
+            echo "- Fixed HIGH/CRITICAL vulnerabilities: ${vulnerabilities}"
+            echo '- Scope: the exact application image built from the tracked Dockerfile and lockfile'
+            echo '- Policy: gated findings retain a nonzero scan result; missing/invalid JSON evidence also fails the job'
+          } | tee "$summary" >> "$GITHUB_STEP_SUMMARY"
       - name: Upload container security evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: trivy-container-evidence-${{ github.run_id }}
-          path: reports/security/container-image.json
-          if-no-files-found: ignore
+          path: |
+            reports/security/container-image.json
+            reports/security/container-summary.md
+          if-no-files-found: error
           retention-days: 14
 
   dependency-review:
