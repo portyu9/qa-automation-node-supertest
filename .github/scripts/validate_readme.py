@@ -38,6 +38,11 @@ MERMAID_ROOTS = (
     "quadrantChart",
     "xychart",
 )
+STABLE_GATES = {
+    "ci-gate": ROOT / ".github" / "workflows" / "ci.yml",
+    "extended-gate": ROOT / ".github" / "workflows" / "extended.yml",
+    "security-gate": ROOT / ".github" / "workflows" / "security.yml",
+}
 
 
 def fail(message: str, errors: list[str]) -> None:
@@ -125,6 +130,18 @@ def validate_repository_map(text: str, errors: list[str]) -> None:
         fail("README repository map contains no directory entries", errors)
 
 
+def validate_stable_gates(text: str, errors: list[str]) -> None:
+    for gate, workflow in STABLE_GATES.items():
+        if not workflow.is_file():
+            fail(f"required workflow is missing for stable gate `{gate}`", errors)
+            continue
+        workflow_text = workflow.read_text(encoding="utf-8")
+        if not re.search(rf"^\s{{2}}{re.escape(gate)}:\s*$", workflow_text, re.MULTILINE):
+            fail(f"workflow does not define stable aggregate job `{gate}`", errors)
+        if f"`{gate}`" not in text:
+            fail(f"README must document stable aggregate job `{gate}`", errors)
+
+
 def main() -> int:
     errors: list[str] = []
     if not README.is_file():
@@ -139,12 +156,15 @@ def main() -> int:
     validate_badge_palette(text, errors)
     validate_mermaid(text, errors)
     validate_repository_map(text, errors)
+    validate_stable_gates(text, errors)
     if errors:
         print("README contract failed:")
         for error in errors:
             print(f"- {error}")
         return 1
-    print("README contract: ok")
+    print(
+        "README contract: links, badges, Mermaid, directory-only map, and stable gates are consistent"
+    )
     return 0
 
 
