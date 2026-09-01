@@ -117,10 +117,9 @@ function validateJest(jest) {
       if (typeof fullName !== 'string' || !fullName.trim()) {
         throw new Error(`Jest assertion has no fullName in ${suiteName}`);
       }
-      if (assertionsByName.has(fullName)) {
-        throw new Error(`duplicate Jest assertion identity: ${fullName}`);
-      }
-      assertionsByName.set(fullName, status);
+      const statuses = assertionsByName.get(fullName) ?? [];
+      statuses.push(status);
+      assertionsByName.set(fullName, statuses);
     }
     suites.set(suiteName, suiteExecuted);
   }
@@ -132,9 +131,11 @@ function validateJest(jest) {
     }
   }
   for (const fullName of GOVERNED_TESTS) {
-    const status = assertionsByName.get(fullName);
-    if (status !== 'passed') {
-      throw new Error(`governed Jest behavior did not pass: ${fullName} status=${status ?? '<missing>'}`);
+    const statuses = assertionsByName.get(fullName);
+    if (!statuses || statuses.length === 0 || statuses.some((status) => status !== 'passed')) {
+      throw new Error(
+        `governed Jest behavior did not pass cleanly: ${fullName} statuses=${statuses ? statuses.join(',') : '<missing>'}`
+      );
     }
   }
 
