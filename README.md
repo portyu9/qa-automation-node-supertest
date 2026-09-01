@@ -16,7 +16,7 @@
 [![License](https://img.shields.io/badge/License-MIT-2EA44F?logo=opensourceinitiative&logoColor=white)](LICENSE)
 [![Security Policy](https://img.shields.io/badge/Security-Policy-24292F?logo=github&logoColor=white)](.github/SECURITY.md)
 
-A deterministic API quality-engineering framework built with **Express 5, Supertest, Jest, Axios, and Pact**. Fast component tests execute the real Express application in-process; external transport is isolated behind a provider-neutral client; Pact owns consumer compatibility; a separate loopback listener contract verifies real TCP/middleware/serialization behavior; and native Supertest agents/expectations remain available for stateful protocol contracts.
+A deterministic API quality-engineering framework built with **Express, Supertest, Jest, Axios, and Pact**. Fast component tests execute the real Express application in-process; external transport is isolated behind a provider-neutral client; Pact owns consumer compatibility; a separate loopback listener contract verifies real TCP/middleware/serialization behavior; and native Supertest agents/expectations remain available for stateful protocol contracts.
 
 > [!IMPORTANT]
 > Application behavior, in-process HTTP behavior, dependency transport behavior, contract compatibility, listener behavior, packaged-runtime behavior, and deployed-environment behavior are different failure domains. The framework keeps those boundaries separate so a failing test answers **what broke** before it asks **where the stack trace ended**.
@@ -77,7 +77,7 @@ flowchart LR
 | Response policy | Reusable `.expect(fn)` helpers validate JSON/header/body contracts without replacing native `.expect()`. |
 | Listener coverage | Real socket behavior is tested on `127.0.0.1:0` with a deterministic injected dependency. |
 | Logging | Shared diagnostics use safe metadata, not request bodies/auth values. |
-| Reproducibility | Node 22/24, npm 11.19.1, a committed lockfile, lifecycle-script-disabled `npm ci`, and a digest-pinned Node 24 container base define the CI-qualified toolchain. |
+| Reproducibility | supported Node runtimes, npm, a committed lockfile, lifecycle-script-disabled `npm ci`, and a digest-pinned Node container base define the CI-qualified toolchain. |
 | Evidence integrity | CI validates at least 60 actually executed Jest tests, measured coverage, Pact interactions, and listener evidence instead of treating artifact presence alone as proof. |
 | Supply chain | External Actions are immutable-SHA pinned and checked locally; npm Audit, repository Trivy, built-image Trivy, CodeQL, and change-aware Dependency Review remain distinct controls. |
 | Container runtime | A major Node base-image change is a deliberate support-matrix decision; scheduled Docker maintenance stays within the supported major. |
@@ -120,7 +120,7 @@ Only directories are shown in the repository map. Root files define the package/
 ## Quick start
 
 ```bash
-npm install --global --ignore-scripts npm@11.19.1
+npm install --global --ignore-scripts npm
 npm ci --ignore-scripts
 npm run check
 npm run test:coverage
