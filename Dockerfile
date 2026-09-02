@@ -1,4 +1,4 @@
-FROM node:24.20.0-alpine3.24@sha256:4caaaf42195bcd6f6f3559a413b20cb8f8ad089e231ee874cf7701643966689f
+FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e
 
 USER root
 RUN npm install --global --ignore-scripts npm@11.19.1 --no-audit --no-fund \
