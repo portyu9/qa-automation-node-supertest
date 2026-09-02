@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 
 const DEFAULT_CONFIG_PATH = '.github/dependency-governance.json';
 const DEP_SECTIONS = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'];
+const PAGE_SIZE = 100;
 
 export function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
@@ -316,37 +317,63 @@ function unique(values) {
 
 export function validateConfig(config) {
   const errors = [];
+  const nonEmpty = (value) => typeof value === 'string' && value.trim().length > 0;
   if (config?.schemaVersion !== 1) errors.push('schemaVersion must equal 1');
   if (config?.botLogin !== 'dependabot[bot]') errors.push('botLogin must be dependabot[bot]');
+  if (!Number.isInteger(config?.botUserId) || config.botUserId <= 0) errors.push('botUserId must be a positive integer');
+  if (!nonEmpty(config?.botAuthorEmail)) errors.push('botAuthorEmail must be non-empty');
+  if (!nonEmpty(config?.trustedCommitterLogin)) errors.push('trustedCommitterLogin must be non-empty');
+  if (!nonEmpty(config?.gitCommitterName) || !nonEmpty(config?.gitCommitterEmail)) errors.push('git committer identity must be configured');
+  if (!nonEmpty(config?.signedOffBy)) errors.push('signedOffBy must be non-empty');
+  if (!nonEmpty(config?.baseBranch)) errors.push('baseBranch must be non-empty');
   if (!['merge', 'squash', 'rebase'].includes(config?.mergeMethod)) errors.push('mergeMethod is invalid');
   if (typeof config?.automergeEnabled !== 'boolean') errors.push('automergeEnabled must be boolean');
+  if (!Number.isInteger(config?.maxChangedFiles) || config.maxChangedFiles < 1 || config.maxChangedFiles > 100) errors.push('maxChangedFiles must be an integer from 1 to 100');
   if (!Number.isInteger(config?.maxPullRequestAgeDays) || config.maxPullRequestAgeDays < 1 || config.maxPullRequestAgeDays > 90) errors.push('maxPullRequestAgeDays must be an integer from 1 to 90');
+  if (!Number.isInteger(config?.maxPaginationPages) || config.maxPaginationPages < 1 || config.maxPaginationPages > 20) errors.push('maxPaginationPages must be an integer from 1 to 20');
   if (!Array.isArray(config?.manualReviewLabels) || config.manualReviewLabels.length === 0) errors.push('manualReviewLabels must be non-empty');
   if (!Array.isArray(config?.requiredWorkflows) || config.requiredWorkflows.length === 0) errors.push('requiredWorkflows must be non-empty');
   const workflowNames = new Set();
   const gateNames = new Set();
+  const workflowFiles = new Set();
   for (const item of config?.requiredWorkflows || []) {
     if (!item.workflow || !item.gate || !item.file) errors.push('each required workflow needs workflow, gate, and dispatch file');
+    if (item.file && (item.file.includes('/') || !/^[A-Za-z0-9._-]+\.ya?ml$/.test(item.file))) errors.push(`workflow file ${item.file} must be a basename ending in .yml or .yaml`);
     if (workflowNames.has(item.workflow)) errors.push(`duplicate workflow ${item.workflow}`);
     if (gateNames.has(item.gate)) errors.push(`duplicate gate ${item.gate}`);
+    if (workflowFiles.has(item.file)) errors.push(`duplicate workflow file ${item.file}`);
     workflowNames.add(item.workflow);
     gateNames.add(item.gate);
+    workflowFiles.add(item.file);
   }
-  if (!Array.isArray(config?.allowedUpdateTypes) || config.allowedUpdateTypes.some((type) => /major/.test(type))) {
+  if (!Array.isArray(config?.allowedUpdateTypes) || config.allowedUpdateTypes.length === 0 || config.allowedUpdateTypes.some((type) => /major/.test(type))) {
     errors.push('allowedUpdateTypes must exist and must never include major updates');
   }
-  for (const critical of ['.github/workflows/security.yml', '.github/workflows/dependency-governance.yml']) {
+  for (const critical of ['.github/workflows/security.yml', '.github/workflows/dependency-governance.yml', '.github/dependency-governance.json', '.github/scripts/dependency-governance.mjs', '.github/scripts/dependency-governance.selfcheck.mjs']) {
     if (!config?.manualReviewPaths?.includes(critical)) errors.push(`${critical} must require manual review`);
   }
-  return errors;
+  if (!Array.isArray(config?.ecosystems?.npm?.files) || config.ecosystems.npm.files.length === 0) errors.push('npm ecosystem files must be configured');
+  if (!Array.isArray(config?.ecosystems?.docker?.files) || config.ecosystems.docker.files.length === 0) errors.push('docker ecosystem files must be configured');
+  if (!Array.isArray(config?.ecosystems?.docker?.allowedImages) || config.ecosystems.docker.allowedImages.length === 0) errors.push('docker allowedImages must be non-empty');
+  if (!nonEmpty(config?.ecosystems?.['github-actions']?.workflowPrefix) || !Array.isArray(config?.ecosystems?.['github-actions']?.extensions)) errors.push('github-actions ecosystem policy is incomplete');
+  return unique(errors);
+}
+
+export function parsePositiveInteger(value, name = 'value') {
+  const text = String(value ?? '').trim();
+  if (!/^[1-9]\d*$/.test(text)) throw new Error(`${name} must be a positive integer`);
+  const number = Number(text);
+  if (!Number.isSafeInteger(number)) throw new Error(`${name} exceeds the safe integer range`);
+  return number;
 }
 
 class GitHubApi {
-  constructor({ token, repository }) {
+  constructor({ token, repository, maxPaginationPages }) {
     if (!token) throw new Error('GITHUB_TOKEN is required');
     if (!repository?.includes('/')) throw new Error('GITHUB_REPOSITORY must be owner/repo');
     this.token = token;
     this.repository = repository;
+    this.maxPaginationPages = maxPaginationPages;
     [this.owner, this.repo] = repository.split('/');
     this.root = `https://api.github.com/repos/${this.owner}/${this.repo}`;
   }
@@ -379,6 +406,19 @@ class GitHubApi {
   post(pathname, body) { return this.request('POST', pathname.startsWith('http') ? pathname : `${this.root}${pathname}`, body); }
   patch(pathname, body) { return this.request('PATCH', pathname.startsWith('http') ? pathname : `${this.root}${pathname}`, body); }
   put(pathname, body) { return this.request('PUT', pathname.startsWith('http') ? pathname : `${this.root}${pathname}`, body); }
+
+  async paginate(pathname, selector = null) {
+    const values = [];
+    for (let page = 1; page <= this.maxPaginationPages; page += 1) {
+      const separator = pathname.includes('?') ? '&' : '?';
+      const payload = await this.get(`${pathname}${separator}per_page=${PAGE_SIZE}&page=${page}`);
+      const pageValues = selector ? payload?.[selector] : payload;
+      if (!Array.isArray(pageValues)) throw new Error(`pagination endpoint ${pathname} did not return ${selector || 'an array'}`);
+      values.push(...pageValues);
+      if (pageValues.length < PAGE_SIZE) return values;
+    }
+    throw new Error(`pagination safety limit reached for ${pathname} after ${this.maxPaginationPages} page(s)`);
+  }
 
   async fileAt(filename, ref) {
     const encodedPath = filename.split('/').map(encodeURIComponent).join('/');
@@ -418,25 +458,29 @@ async function getPullCommits(api, pull) {
 export function validateProvenance({ pull, commits, baseSha, config, now = new Date() }) {
   const reasons = [];
   if (pull.user?.login !== config.botLogin) reasons.push(`PR author is ${pull.user?.login || 'unknown'}, not ${config.botLogin}`);
+  if (pull.user?.id !== config.botUserId) reasons.push(`PR author numeric identity is ${pull.user?.id ?? 'unknown'}, expected ${config.botUserId}`);
   if (pull.base?.ref !== config.baseBranch) reasons.push(`base branch is ${pull.base?.ref}, expected ${config.baseBranch}`);
   if (pull.head?.repo?.full_name !== pull.base?.repo?.full_name) reasons.push('Dependabot PR head must be in the same repository');
   if (!String(pull.head?.ref || '').startsWith('dependabot/')) reasons.push('head branch is not a Dependabot branch');
   if (pull.draft) reasons.push('draft PRs are never autonomously merged');
   if (config.automergeEnabled !== true) reasons.push('repository autonomous merge kill switch is disabled');
   const labels = new Set((pull.labels || []).map((label) => typeof label === 'string' ? label : label.name).filter(Boolean));
-  for (const label of config.manualReviewLabels || []) {
-    if (labels.has(label)) reasons.push(`PR carries manual-review label ${label}`);
-  }
+  for (const label of config.manualReviewLabels || []) if (labels.has(label)) reasons.push(`PR carries manual-review label ${label}`);
   const createdAt = new Date(pull.created_at);
-  if (!Number.isNaN(createdAt.getTime()) && Number.isFinite(config.maxPullRequestAgeDays)) {
-    const ageMs = now.getTime() - createdAt.getTime();
-    if (ageMs > config.maxPullRequestAgeDays * 86_400_000) reasons.push(`PR is older than autonomous limit ${config.maxPullRequestAgeDays} day(s)`);
-  }
+  if (Number.isNaN(createdAt.getTime())) reasons.push('PR creation timestamp is invalid');
+  else if (now.getTime() - createdAt.getTime() > config.maxPullRequestAgeDays * 86_400_000) reasons.push(`PR is older than autonomous limit ${config.maxPullRequestAgeDays} day(s)`);
   if (commits.length !== 1 || pull.commits !== 1) reasons.push('autonomous merge requires exactly one Dependabot commit');
   const commit = commits[0];
   if (commit) {
     if (commit.author?.login !== config.botLogin) reasons.push(`commit author is ${commit.author?.login || 'unknown'}, not ${config.botLogin}`);
-    if (commit.commit?.verification?.verified !== true) reasons.push('Dependabot commit signature is not GitHub-verified');
+    if (commit.author?.id !== config.botUserId) reasons.push(`commit author numeric identity is ${commit.author?.id ?? 'unknown'}, expected ${config.botUserId}`);
+    if (commit.committer?.login !== config.trustedCommitterLogin) reasons.push(`commit was materialized by ${commit.committer?.login || 'unknown'}, expected ${config.trustedCommitterLogin}`);
+    if (commit.commit?.author?.name !== config.botLogin) reasons.push('Git commit author name does not match Dependabot');
+    if (commit.commit?.author?.email !== config.botAuthorEmail) reasons.push('Git commit author email does not match canonical Dependabot identity');
+    if (commit.commit?.committer?.name !== config.gitCommitterName || commit.commit?.committer?.email !== config.gitCommitterEmail) reasons.push('Git commit committer identity does not match GitHub signing infrastructure');
+    if (commit.commit?.verification?.verified !== true || commit.commit?.verification?.reason !== 'valid') reasons.push('Dependabot commit signature is not GitHub-verified as valid');
+    if (typeof commit.commit?.verification?.signature !== 'string' || commit.commit.verification.signature.length === 0) reasons.push('Dependabot commit has no verifiable signature material');
+    if (!String(commit.commit?.message || '').includes(config.signedOffBy)) reasons.push('Dependabot commit is missing the canonical Signed-off-by trailer');
     if (commit.parents?.length !== 1) reasons.push('Dependabot commit must not be a merge commit');
     if (commit.parents?.[0]?.sha !== baseSha) reasons.push('PR is not rebased directly on the current base branch head');
     if (commit.sha !== pull.head?.sha) reasons.push('PR head SHA does not equal the verified Dependabot commit SHA');
@@ -453,6 +497,39 @@ export function validateSignedMetadata(commit, config) {
     if (!config.allowedUpdateTypes.includes(item.updateType)) reasons.push(`${item.name || 'dependency'} uses non-autonomous update type ${item.updateType || 'unknown'}`);
   }
   return { eligible: reasons.length === 0, reasons: unique(reasons), metadata };
+}
+
+
+export function workflowIdentityMatches(run, pull, requirement) {
+  const expectedPath = `.github/workflows/${requirement.file}`;
+  const associationMatches = !Array.isArray(run?.pull_requests)
+    || run.pull_requests.length === 0
+    || run.pull_requests.some((item) => item.number === pull.number);
+  return run?.name === requirement.workflow
+    && run?.path === expectedPath
+    && run?.event === 'pull_request'
+    && run?.head_sha === pull.head.sha
+    && run?.head_branch === pull.head.ref
+    && associationMatches;
+}
+
+export function selectQualificationRun(runs, pull, requirement) {
+  return runs
+    .filter((run) => workflowIdentityMatches(run, pull, requirement))
+    .sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at))[0] || null;
+}
+
+export async function reconcileIndependently(pulls, processor) {
+  const results = [];
+  const failures = [];
+  for (const pull of pulls) {
+    try {
+      results.push({ number: pull.number, result: await processor(pull) });
+    } catch (error) {
+      failures.push({ number: pull.number, error: error?.message || String(error) });
+    }
+  }
+  return { results, failures };
 }
 
 async function validateChangeSemantics({ api, pull, files, ecosystem, metadata, config }) {
@@ -482,15 +559,10 @@ async function validateChangeSemantics({ api, pull, files, ecosystem, metadata, 
 }
 
 async function qualificationForHead(api, pull, config) {
-  const runsPayload = await api.get(`/actions/runs?head_sha=${encodeURIComponent(pull.head.sha)}&event=pull_request&per_page=100`);
-  const runs = runsPayload.workflow_runs || [];
+  const runs = await api.paginate(`/actions/runs?head_sha=${encodeURIComponent(pull.head.sha)}&event=pull_request`, 'workflow_runs');
   const qualifications = [];
   for (const requirement of config.requiredWorkflows) {
-    const candidates = runs
-      .filter((run) => run.name === requirement.workflow && run.head_sha === pull.head.sha)
-      .filter((run) => !Array.isArray(run.pull_requests) || run.pull_requests.length === 0 || run.pull_requests.some((item) => item.number === pull.number))
-      .sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
-    const run = candidates[0];
+    const run = selectQualificationRun(runs, pull, requirement);
     if (!run) {
       qualifications.push({ ...requirement, state: 'missing', runId: null });
       continue;
@@ -503,9 +575,8 @@ async function qualificationForHead(api, pull, config) {
       qualifications.push({ ...requirement, state: `run-${run.conclusion || 'unknown'}`, runId: run.id });
       continue;
     }
-    const jobsPayload = await api.get(`/actions/runs/${run.id}/jobs?filter=latest&per_page=100`);
-    const gates = (jobsPayload.jobs || []).filter((job) => job.name === requirement.gate);
-    const gate = gates.sort((a, b) => b.id - a.id)[0];
+    const jobs = await api.paginate(`/actions/runs/${run.id}/jobs?filter=latest`, 'jobs');
+    const gate = jobs.filter((job) => job.name === requirement.gate).sort((a, b) => b.id - a.id)[0];
     if (!gate) qualifications.push({ ...requirement, state: 'gate-missing', runId: run.id });
     else if (gate.status !== 'completed') qualifications.push({ ...requirement, state: 'gate-pending', runId: run.id });
     else if (gate.conclusion !== 'success') qualifications.push({ ...requirement, state: `gate-${gate.conclusion || 'unknown'}`, runId: run.id });
@@ -576,9 +647,10 @@ function renderComment({ assessment, config, merged = false, dispatches = [] }) 
 }
 
 async function upsertComment(api, pullNumber, marker, body) {
-  const comments = await api.get(`/issues/${pullNumber}/comments?per_page=100`);
-  const existing = comments.find((comment) => comment.user?.login === 'github-actions[bot]' && String(comment.body || '').includes(marker));
-  if (existing) return api.patch(`/issues/comments/${existing.id}`, { body });
+  const comments = await api.paginate(`/issues/${pullNumber}/comments`);
+  const matches = comments.filter((comment) => comment.user?.login === 'github-actions[bot]' && String(comment.body || '').includes(marker));
+  if (matches.length > 1) throw new Error(`found ${matches.length} governance status comments; refusing ambiguous idempotent update`);
+  if (matches.length === 1) return api.patch(`/issues/comments/${matches[0].id}`, { body });
   return api.post(`/issues/${pullNumber}/comments`, { body });
 }
 
@@ -651,11 +723,11 @@ async function maybeMerge(api, assessment, config, allowMerge) {
   return { merged: result?.merged === true, result, refreshed, dispatches };
 }
 
-function eventPullNumber(event, eventName) {
+export function eventPullNumber(event, eventName) {
   if (eventName === 'pull_request_target' || eventName === 'pull_request') return event.pull_request?.number || null;
   if (eventName === 'workflow_dispatch') {
     const value = event.inputs?.['pr-number'];
-    return value ? Number(value) : null;
+    return value == null || value === '' ? null : parsePositiveInteger(value, 'workflow_dispatch pr-number');
   }
   if (eventName === 'workflow_run') return event.workflow_run?.pull_requests?.[0]?.number || null;
   return null;
@@ -666,13 +738,13 @@ async function resolveWorkflowRunPull(api, event) {
   if (direct) return direct;
   const branch = event.workflow_run?.head_branch;
   if (!branch) return null;
-  const pulls = await api.get(`/pulls?state=open&head=${encodeURIComponent(`${api.owner}:${branch}`)}&per_page=10`);
+  const pulls = await api.paginate(`/pulls?state=open&head=${encodeURIComponent(`${api.owner}:${branch}`)}`);
   return pulls.length === 1 ? pulls[0].number : null;
 }
 
 async function processPull(api, number, config, { allowMerge, includeQualification = true }) {
   const assessment = await assessPull(api, number, config, { includeQualification });
-  if (assessment.pull.user?.login !== config.botLogin) return { skipped: true, reason: 'not Dependabot' };
+  if (assessment.pull.user?.login !== config.botLogin || assessment.pull.user?.id !== config.botUserId) return { skipped: true, reason: 'not canonical Dependabot' };
   const mergeAttempt = await maybeMerge(api, assessment, config, allowMerge);
   const finalAssessment = mergeAttempt.refreshed || assessment;
   const body = renderComment({ assessment: finalAssessment, config, merged: mergeAttempt.merged, dispatches: mergeAttempt.dispatches || [] });
@@ -694,14 +766,15 @@ async function main() {
   const eventPath = process.env.GITHUB_EVENT_PATH;
   if (!eventName || !eventPath) throw new Error('GITHUB_EVENT_NAME and GITHUB_EVENT_PATH are required');
   const event = JSON.parse(fs.readFileSync(eventPath, 'utf8'));
-  const api = new GitHubApi({ token: process.env.GITHUB_TOKEN, repository: process.env.GITHUB_REPOSITORY });
+  const api = new GitHubApi({ token: process.env.GITHUB_TOKEN, repository: process.env.GITHUB_REPOSITORY, maxPaginationPages: config.maxPaginationPages });
   const allowMerge = process.env.ALLOW_MERGE === 'true';
 
   if (eventName === 'schedule') {
-    const pulls = await api.get('/pulls?state=open&per_page=100');
-    const dependabotPulls = pulls.filter((pull) => pull.user?.login === config.botLogin);
-    for (const pull of dependabotPulls) await processPull(api, pull.number, config, { allowMerge, includeQualification: true });
-    console.log(`reconciled ${dependabotPulls.length} open Dependabot PR(s)`);
+    const pulls = await api.paginate('/pulls?state=open');
+    const dependabotPulls = pulls.filter((pull) => pull.user?.login === config.botLogin && pull.user?.id === config.botUserId);
+    const reconciliation = await reconcileIndependently(dependabotPulls, (pull) => processPull(api, pull.number, config, { allowMerge, includeQualification: true }));
+    console.log(JSON.stringify({ reconciled: reconciliation.results.length, failed: reconciliation.failures }, null, 2));
+    if (reconciliation.failures.length) throw new Error(`scheduled dependency governance failed for ${reconciliation.failures.length} PR(s)`);
     return;
   }
 
