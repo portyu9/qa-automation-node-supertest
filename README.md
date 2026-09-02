@@ -40,27 +40,53 @@ A deterministic API quality-engineering framework built with **Express, Supertes
 
 ```mermaid
 flowchart LR
-    TEST[Jest / Supertest] --> AGENT[Correlated request.agent]
+    CHANGE[Repository change] --> TEST[Jest / Supertest]
+    TEST --> AGENT[Correlated request.agent]
     AGENT --> APP[createApp]
     APP --> ROUTE[posts router]
     ROUTE --> PORT[posts client boundary]
     PORT --> AXIOS[PostsUpstreamClient / Axios]
     PORT --> ERR[Error normalization]
     TEST --> EXPECT[Composable response contracts]
-    PACT[Pact] --> MOCK[Pact provider]
-    LISTENER[Loopback listener smoke] --> APP
-    SERVER[src/server.js] --> CFG[loadConfig]
-    CFG --> PORT
     APP --> ENVELOPE[Stable public error contract]
+    ENVELOPE --> CIG[CI / ci-gate]
+    EXPECT --> CIG
+
+    CHANGE --> PACT[Pact contracts]
+    PACT --> MOCK[Pact provider]
+    CHANGE --> LISTENER[Loopback listener smoke]
+    LISTENER --> APP
+    CHANGE --> SERVER[src/server.js]
+    SERVER --> CFG[loadConfig]
+    CFG --> PORT
+
+    CHANGE --> EXT[Runtime + integration compatibility]
+    EXT --> EG[Extended / extended-gate]
+
+    CHANGE --> DOCS[README + workflow contracts]
+    DOCS --> DG[Docs / readme-contract]
+
+    SAST[CodeQL] --> SG[Security / security-gate]
+    AUDIT[npm Audit] --> SG
+    REPO[Trivy repository scan] --> SG
+    IMAGE[Trivy built-image scan] --> SG
+    REVIEW[Dependency Review when available] --> SG
+
+    CIG --> RESULT[Qualified repository change]
+    EG --> RESULT
+    DG --> RESULT
+    SG --> RESULT
 
     classDef entry fill:#ddf4ff,stroke:#0969da,color:#24292f,stroke-width:1.5px;
     classDef policy fill:#fbefff,stroke:#8250df,color:#24292f,stroke-width:1.5px;
     classDef runtime fill:#fff8c5,stroke:#9a6700,color:#24292f,stroke-width:1.5px;
     classDef evidence fill:#dafbe1,stroke:#1a7f37,color:#24292f,stroke-width:1.5px;
-    class TEST,PACT,LISTENER,SERVER entry;
-    class AGENT,EXPECT,CFG,ERR policy;
-    class APP,ROUTE,PORT,AXIOS,MOCK runtime;
-    class ENVELOPE evidence;
+    classDef gate fill:#ffebe9,stroke:#cf222e,color:#24292f,stroke-width:1.5px;
+    class CHANGE entry;
+    class AGENT,EXPECT,ERR,CFG,DOCS policy;
+    class TEST,APP,ROUTE,PORT,AXIOS,PACT,MOCK,LISTENER,SERVER,EXT runtime;
+    class ENVELOPE,RESULT evidence;
+    class CIG,EG,DG,SAST,AUDIT,REPO,IMAGE,REVIEW,SG gate;
     linkStyle default stroke:#57606a,stroke-width:1.4px;
 ```
 
