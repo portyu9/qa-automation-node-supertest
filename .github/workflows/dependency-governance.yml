@@ -29,8 +29,10 @@ on:
 permissions:
   contents: read
 
+# Keep unprivileged governance-code self-tests independent from privileged
+# reconciliation, while serializing/coalescing reconciliations for one branch.
 concurrency:
-  group: dependency-governance-${{ github.event.pull_request.head.ref || github.event.workflow_run.head_branch || github.ref_name || github.run_id }}
+  group: dependency-governance-${{ github.event.pull_request.head.ref || github.event.workflow_run.head_branch || github.ref_name || github.run_id }}-${{ github.event_name == 'pull_request' && 'self-test' || 'reconcile' }}
   cancel-in-progress: false
 
 env:
