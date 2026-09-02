@@ -17,8 +17,13 @@ if (!/^FROM\s+node:[^\s@]+@sha256:[0-9a-f]{64}$/.test(firstInstruction ?? '')) {
   errors.push('Dockerfile must start from an explicit Node tag pinned by a sha256 digest');
 }
 
-if (/\bapk\s+(?:update|upgrade)\b/.test(dockerfile)) {
-  errors.push('Dockerfile must not mutate the pinned Alpine base with floating apk update/upgrade operations');
+const floatingOsMutations = [
+  /\bapk\s+(?:update|upgrade)\b/,
+  /\bapt(?:-get)?\s+(?:update|upgrade|dist-upgrade|full-upgrade)\b/,
+  /\b(?:dnf|yum|microdnf)\s+(?:update|upgrade)\b/,
+];
+if (floatingOsMutations.some((pattern) => pattern.test(dockerfile))) {
+  errors.push('Dockerfile must not mutate the digest-pinned OS layer with floating package-index or OS upgrade operations');
 }
 
 const packageManager = packageJson.packageManager;
