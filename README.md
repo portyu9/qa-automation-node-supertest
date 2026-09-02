@@ -54,11 +54,17 @@ flowchart LR
 
     CHANGE --> PACT[Pact contracts]
     PACT --> MOCK[Pact provider]
+    PACT --> CIG
     CHANGE --> LISTENER[Loopback listener smoke]
     LISTENER --> APP
+    LISTENER --> CIG
     CHANGE --> SERVER[src/server.js]
     SERVER --> CFG[loadConfig]
     CFG --> PORT
+
+    CHANGE --> PKG[Tracked application image]
+    PKG --> ENTRY[Packaged test entrypoint]
+    ENTRY --> CIG
 
     CHANGE --> EXT[Runtime + integration compatibility]
     EXT --> EG[Extended / extended-gate]
@@ -84,7 +90,7 @@ flowchart LR
     classDef gate fill:#ffebe9,stroke:#cf222e,color:#24292f,stroke-width:1.5px;
     class CHANGE entry;
     class AGENT,EXPECT,ERR,CFG,DOCS policy;
-    class TEST,APP,ROUTE,PORT,AXIOS,PACT,MOCK,LISTENER,SERVER,EXT runtime;
+    class TEST,APP,ROUTE,PORT,AXIOS,PACT,MOCK,LISTENER,SERVER,PKG,ENTRY,EXT runtime;
     class ENVELOPE,RESULT evidence;
     class CIG,EG,DG,SAST,AUDIT,REPO,IMAGE,REVIEW,SG gate;
     linkStyle default stroke:#57606a,stroke-width:1.4px;
