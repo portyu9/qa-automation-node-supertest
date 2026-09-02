@@ -1,0 +1,44 @@
+name: apply-diagram-rescan
+
+on:
+  push:
+    branches: [docs/diagram-rescan-fix]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: docs/diagram-rescan-fix
+      - name: Correct required CI convergence in Mermaid architecture
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('README.md')
+          s = p.read_text(encoding='utf-8')
+          replacements = [
+              ('    PACT --> MOCK[Pact provider]\n', '    PACT --> MOCK[Pact provider]\n    PACT --> CIG\n'),
+              ('    LISTENER --> APP\n', '    LISTENER --> APP\n    LISTENER --> CIG\n'),
+              ('    CFG --> PORT\n\n    CHANGE --> EXT[Runtime + integration compatibility]\n', '    CFG --> PORT\n\n    CHANGE --> PKG[Tracked application image]\n    PKG --> ENTRY[Packaged test entrypoint]\n    ENTRY --> CIG\n\n    CHANGE --> EXT[Runtime + integration compatibility]\n'),
+              ('    class TEST,APP,ROUTE,PORT,AXIOS,PACT,MOCK,LISTENER,SERVER,EXT runtime;\n', '    class TEST,APP,ROUTE,PORT,AXIOS,PACT,MOCK,LISTENER,SERVER,PKG,ENTRY,EXT runtime;\n'),
+          ]
+          for old, new in replacements:
+              if s.count(old) != 1:
+                  raise SystemExit(f'expected one exact diagram fragment: {old!r}')
+              s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+      - name: Commit README correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add README.md
+          git diff --cached --check
+          git commit -m 'docs: align Mermaid diagram with required CI lanes'
+          git push origin HEAD:docs/diagram-rescan-fix
