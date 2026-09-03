@@ -115,6 +115,8 @@ jobs:
         run: mkdir -p reports/security
       - name: Scan dependencies, configuration, and repository secrets
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_INCLUDE_DEV_DEPS: 'true'
         with:
           version: v0.74.0
           scan-type: fs
@@ -125,33 +127,28 @@ jobs:
           format: json
           output: reports/security/trivy.json
           exit-code: "1"
-      - name: Require and summarize repository security evidence
+      - name: Require attributed repository security evidence
         if: always()
         shell: bash
         run: |
           set -euo pipefail
           report="reports/security/trivy.json"
           summary="reports/security/summary.md"
-          if [[ ! -s "$report" ]]; then
-            printf '### Repository security gate\n\nTrivy did not produce a report. Treating missing scanner evidence as a gate failure.\n' | tee "$summary" >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
-          jq -e '(.Results | type) == "array"' "$report" >/dev/null
-          vulnerabilities=$(jq '[.Results[]? | .Vulnerabilities[]?] | length' "$report")
-          misconfigurations=$(jq '[.Results[]? | .Misconfigurations[]?] | length' "$report")
-          secrets=$(jq '[.Results[]? | .Secrets[]?] | length' "$report")
+          node scripts/validate-security-evidence.js "$report"
+          npm_packages=$(jq '[.Results[]? | select(.Type == "npm" or ((.Target // "") | contains("package-lock.json"))) | .Packages[]?] | length' "$report")
+          supertest_version=$(node -p "require('./package-lock.json').packages['node_modules/supertest'].version")
+          pact_version=$(node -p "require('./package-lock.json').packages['node_modules/@pact-foundation/pact'].version")
           {
             echo '### Repository security gate'
             echo
-            echo '| Signal | Findings |'
-            echo '| --- | ---: |'
-            echo "| Fixed HIGH/CRITICAL vulnerabilities | ${vulnerabilities} |"
-            echo "| HIGH/CRITICAL misconfigurations | ${misconfigurations} |"
-            echo "| Gated secret findings | ${secrets} |"
-            echo
-            echo '- Scanner: Trivy v0.74.0'
-            echo '- Scope: repository filesystem, dependency manifests/locks, supported configuration files, and committed secret material'
-            echo '- Policy: gated findings retain a nonzero scan result; missing/invalid JSON evidence also fails the job'
+            echo "- Attributed npm packages: ${npm_packages}"
+            echo "- Locked Supertest runtime: ${supertest_version}"
+            echo "- Locked Pact runtime: ${pact_version}"
+            echo '- Gated HIGH/CRITICAL vulnerabilities: 0'
+            echo '- Gated misconfigurations: 0'
+            echo '- Gated secret findings: 0'
+            echo '- Scanner: Trivy v0.74.0 with development dependencies enabled'
+            echo '- Fail-closed: scanner/version evidence, substantive npm inventory, exact governed packages, and zero gated findings are all required'
           } | tee "$summary" >> "$GITHUB_STEP_SUMMARY"
       - name: Upload repository security evidence
         if: always()
