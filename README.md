@@ -154,7 +154,7 @@ Only directories are shown in the repository map. Root files define the package/
 ## Quick start
 
 ```bash
-npm install --global --ignore-scripts npm
+npm install --global --ignore-scripts npm@11.19.1
 npm ci --ignore-scripts
 npm run check
 npm run test:coverage
