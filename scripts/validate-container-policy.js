@@ -7,11 +7,13 @@ const packagePath = 'package.json';
 const lockPath = 'package-lock.json';
 const ciPath = '.github/workflows/ci.yml';
 const extendedPath = '.github/workflows/extended.yml';
+const securityPath = '.github/workflows/security.yml';
 const dockerfile = fs.readFileSync(dockerfilePath, 'utf8');
 const packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
 const packageLock = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
 const ci = fs.readFileSync(ciPath, 'utf8');
 const extended = fs.readFileSync(extendedPath, 'utf8');
+const security = fs.readFileSync(securityPath, 'utf8');
 
 const errors = [];
 const firstInstruction = dockerfile
@@ -66,6 +68,31 @@ function collectWorkflowNodeMatrices(name, workflow) {
   return matrices;
 }
 
+function parseWorkflowNpmVersion(name, workflow) {
+  const matches = [
+    ...workflow.matchAll(/^\s{2}NPM_VERSION:\s*["']?(\d+\.\d+\.\d+)["']?\s*$/gm),
+  ];
+  if (matches.length !== 1) {
+    errors.push(`${name} must declare exactly one top-level NPM_VERSION`);
+    return null;
+  }
+  if (!workflow.includes('npm@${NPM_VERSION}')) {
+    errors.push(`${name} must install npm through the governed NPM_VERSION`);
+  }
+  if (!workflow.includes('$(npm --version)')) {
+    errors.push(`${name} must verify the installed npm version`);
+  }
+  return matches[0][1];
+}
+
+function collectExplicitNodeMajors(workflow) {
+  const majors = new Set();
+  for (const match of workflow.matchAll(/node-version:\s*["']?(\d+)(?:\.\d+\.\d+)?["']?\s*$/gm)) {
+    majors.add(Number(match[1]));
+  }
+  return [...majors].sort((a, b) => a - b);
+}
+
 function sameNumbers(left, right) {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
@@ -90,17 +117,31 @@ for (const [name, workflow] of [
   }
 }
 
+let imageMajor = null;
 if (fromMatch) {
   const imageMajorMatch = /^(\d+)(?:\.|$)/.exec(fromMatch[1]);
   if (!imageMajorMatch) {
     errors.push(`Dockerfile Node tag must begin with a numeric major version: ${fromMatch[1]}`);
   } else {
-    const imageMajor = Number(imageMajorMatch[1]);
+    imageMajor = Number(imageMajorMatch[1]);
     if (!supportedMajors.includes(imageMajor)) {
       errors.push(
         `Dockerfile Node major ${imageMajor} is outside the declared supported majors [${supportedMajors}]`
       );
     }
+  }
+}
+
+const securityMajors = collectExplicitNodeMajors(security);
+if (securityMajors.length === 0) {
+  errors.push('security.yml must declare its Node runtime explicitly');
+} else {
+  const unsupported = securityMajors.filter((major) => !supportedMajors.includes(major));
+  if (unsupported.length > 0) {
+    errors.push(`security.yml uses unsupported Node majors: ${unsupported.join(',')}`);
+  }
+  if (imageMajor !== null && !securityMajors.includes(imageMajor)) {
+    errors.push(`security.yml must include packaged primary Node major ${imageMajor}`);
   }
 }
 
@@ -114,9 +155,9 @@ if (floatingOsMutations.some((pattern) => pattern.test(dockerfile))) {
 }
 
 const packageManager = packageJson.packageManager;
-const npmMatch = typeof packageManager === 'string' ? /^npm@(.+)$/.exec(packageManager) : null;
+const npmMatch = typeof packageManager === 'string' ? /^npm@(\d+\.\d+\.\d+)$/.exec(packageManager) : null;
 if (!npmMatch) {
-  errors.push('package.json packageManager must pin an npm version');
+  errors.push('package.json packageManager must pin npm as npm@major.minor.patch');
 } else {
   const npmVersion = npmMatch[1];
   if (!dockerfile.includes(`npm@${npmVersion}`)) {
@@ -124,6 +165,16 @@ if (!npmMatch) {
   }
   if (!dockerfile.includes(`test "$(npm --version)" = "${npmVersion}"`)) {
     errors.push(`Dockerfile must verify the packageManager npm version (${npmVersion})`);
+  }
+  for (const [name, workflow] of [
+    ['ci.yml', ci],
+    ['extended.yml', extended],
+    ['security.yml', security],
+  ]) {
+    const workflowNpm = parseWorkflowNpmVersion(name, workflow);
+    if (workflowNpm !== null && workflowNpm !== npmVersion) {
+      errors.push(`${name} NPM_VERSION must match packageManager: ${workflowNpm} != ${npmVersion}`);
+    }
   }
 }
 
@@ -145,5 +196,5 @@ if (errors.length > 0) {
 }
 
 console.log(
-  `Container/runtime policy: supported Node majors [${supportedMajors}] match package/lock CI matrices and the digest-pinned container; npm/toolchain, immutable OS, script-disabled install, and non-root runtime are consistent`
+  `Container/runtime policy: supported Node majors [${supportedMajors}] match package/lock CI/Extended matrices, security Node [${securityMajors}], and the digest-pinned container; npm/toolchain is bound across CI/Extended/Security/container; immutable OS, script-disabled install, and non-root runtime are consistent`
 );
