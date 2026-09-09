@@ -17,6 +17,16 @@ flowchart LR
     P[Pact tests] --> HC
     APP --> ERR[Stable error middleware]
     DOCKER[Tracked Dockerfile] --> TESTS[npm test as non-root node]
+
+    classDef entry fill:#DDF4FF,stroke:#0969DA,color:#24292F,stroke-width:1.5px;
+    classDef policy fill:#FBEFFF,stroke:#8250DF,color:#24292F,stroke-width:1.5px;
+    classDef runtime fill:#FFF8C5,stroke:#9A6700,color:#24292F,stroke-width:1.5px;
+    classDef evidence fill:#DAFBE1,stroke:#1A7F37,color:#24292F,stroke-width:1.5px;
+    class T,P,PROD entry;
+    class AG,CFG,C,HC,ERR policy;
+    class APP,R,AX,DOCKER runtime;
+    class TESTS evidence;
+    linkStyle default stroke:#57606A,stroke-width:1.4px;
 ```
 
 ## Composition and dependency injection
