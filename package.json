@@ -22,7 +22,7 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@pact-foundation/pact": "^17.1.2",
+    "@pact-foundation/pact": "^17.1.4",
     "axios": "^1.6.7",
     "express": "^5.2.1",
     "supertest": "^7.2.2"
