@@ -1,10 +1,7 @@
-FROM node:24.21.0-bookworm-slim@sha256:2fe369e969550cde8e867afc3fe370b260140cab4a23d467074295b42163d553
+FROM node:24.21.0-trixie-slim@sha256:db3ae80f5d8df06e04dabdf7b44cbf008d32de168205fa0294444aabbc08c590
 
 USER root
-RUN apt-get update \
-    && apt-get install --yes --no-install-recommends libpcre2-8-0=10.42-1+deb12u1 \
-    && rm -rf /var/lib/apt/lists/* \
-    && npm install --global --ignore-scripts npm@11.19.1 --no-audit --no-fund \
+RUN npm install --global --ignore-scripts npm@11.19.1 --no-audit --no-fund \
     && test "$(npm --version)" = "11.19.1" \
     && npm cache clean --force
 
