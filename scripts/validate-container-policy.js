@@ -145,13 +145,44 @@ if (securityMajors.length === 0) {
   }
 }
 
-const floatingOsMutations = [
+const forbiddenOsMutations = [
   /\bapk\s+(?:update|upgrade)\b/,
-  /\bapt(?:-get)?\s+(?:update|upgrade|dist-upgrade|full-upgrade)\b/,
+  /\bapt(?:-get)?\s+(?:upgrade|dist-upgrade|full-upgrade)\b/,
   /\b(?:dnf|yum|microdnf)\s+(?:update|upgrade)\b/,
 ];
-if (floatingOsMutations.some((pattern) => pattern.test(dockerfile))) {
-  errors.push('Dockerfile must not mutate the digest-pinned OS layer with floating package-index or OS upgrade operations');
+if (forbiddenOsMutations.some((pattern) => pattern.test(dockerfile))) {
+  errors.push('Dockerfile must not perform floating OS upgrade operations');
+}
+
+const governedOsFixes = [
+  ['GZIP_VERSION', 'gzip', '1.13-1+deb13u1'],
+  ['PCRE2_VERSION', 'libpcre2-8-0', '10.46-1~deb13u2'],
+  ['SQLITE3_VERSION', 'libsqlite3-0', '3.46.1-7+deb13u2'],
+  ['PERL_BASE_VERSION', 'perl-base', '5.40.1-6+deb13u1'],
+];
+const aptUpdates = [...dockerfile.matchAll(/\bapt(?:-get)?\s+update\b/g)];
+if (aptUpdates.length > 0) {
+  if (aptUpdates.length !== 1) {
+    errors.push('Dockerfile may perform at most one package-index refresh for governed security remediation');
+  }
+  if (!dockerfile.includes('apt-get install -y --no-install-recommends')) {
+    errors.push('governed OS security remediation must disable recommended packages');
+  }
+  if (!dockerfile.includes('rm -rf /var/lib/apt/lists/*')) {
+    errors.push('governed OS security remediation must remove package-index metadata');
+  }
+
+  for (const [arg, packageName, version] of governedOsFixes) {
+    if (!dockerfile.includes(`ARG ${arg}=${version}`)) {
+      errors.push(`Dockerfile must pin ${packageName} remediation as ARG ${arg}=${version}`);
+    }
+    if (!dockerfile.includes(`"${packageName}=\${${arg}}"`)) {
+      errors.push(`Dockerfile must install exact governed version for ${packageName}`);
+    }
+    if (!dockerfile.includes(`dpkg-query -W -f='\${Version}' ${packageName}`)) {
+      errors.push(`Dockerfile must verify the installed ${packageName} version`);
+    }
+  }
 }
 
 const packageManager = packageJson.packageManager;
@@ -195,6 +226,9 @@ if (errors.length > 0) {
   process.exit(1);
 }
 
+const osPolicy = aptUpdates.length > 0
+  ? 'exact-version verified Debian security remediation'
+  : 'immutable base OS';
 console.log(
-  `Container/runtime policy: supported Node majors [${supportedMajors}] match package/lock CI/Extended matrices, security Node [${securityMajors}], and the digest-pinned container; npm/toolchain is bound across CI/Extended/Security/container; immutable OS, script-disabled install, and non-root runtime are consistent`
+  `Container/runtime policy: supported Node majors [${supportedMajors}] match package/lock CI/Extended matrices, security Node [${securityMajors}], and the digest-pinned container; npm/toolchain is bound across CI/Extended/Security/container; ${osPolicy}, script-disabled install, and non-root runtime are consistent`
 );
