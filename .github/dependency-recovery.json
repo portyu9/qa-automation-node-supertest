@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "enabled": true,
+  "maxRunAttempts": 2,
+  "transientSteps": [
+    "Checkout",
+    "Set up Node.js",
+    "Pin npm toolchain",
+    "Run npm ci --ignore-scripts --no-audit --no-fund",
+    "Upload coverage and contract evidence",
+    "Upload extended evidence",
+    "Upload npm audit evidence",
+    "Upload repository security evidence",
+    "Upload container security evidence"
+  ]
+}

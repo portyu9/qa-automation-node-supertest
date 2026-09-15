@@ -49,8 +49,20 @@ Every qualifying workflow completion re-evaluates the pull request. A scheduled 
 
 The bot maintains one idempotent pull-request status comment describing provenance, base freshness, update class, semantic scope, exact-head workflow state, and any reason autonomous merge is blocked. It fails closed: unknown structure, API ambiguity, stale base, unsigned or non-Dependabot history, excessive change scope, or an unrecognized update type always means no autonomous merge.
 
+## Bounded recovery of transient qualification failures
+
+A routine, otherwise-governable Dependabot pull request may receive at most one automated failed-job rerun when qualification is red only because of a proven transient infrastructure incident. Recovery reuses the same canonical Dependabot identity, signed single-commit provenance, current-`main` ancestry, signed update metadata, and allowlisted ecosystem checks before it can act. It has no merge authority.
+
+Only explicitly named infrastructure steps can qualify. In this repository the allowlist is limited to npm toolchain/dependency installation and artifact uploads. Jest/Supertest/Pact execution, listener contracts, evidence validators, Docker image builds, npm Audit, Trivy/CodeQL analysis, Dependency Review, and aggregate gates are never recovery candidates.
+
+Transient evidence is attributable only when a precise modeled network/service signature occurs in timestamped raw-log lines inside the failed step's own execution window. Deterministic evidence such as dependency-resolution errors, lockfile mismatch, client/policy HTTP failures, permission errors, or disk exhaustion blocks recovery even if transient-looking text also appears. Missing logs/timestamps, multiple failed steps, ambiguous sibling jobs, a missing/duplicated aggregate gate, or a second failed attempt also fail closed.
+
+Recovery never pushes to a Dependabot branch, synthesizes commits, rewrites a lockfile, edits product/test code, or calls GitHub's update-branch endpoint. Stale proposals use Dependabot's explicit native `rebase-strategy: auto` and remain ineligible until Dependabot produces a fresh signed single commit directly on current `main`.
+
+A recovery rerun does not make the dependency safe. The ordinary exact-head gates must still become green, after which dependency governance independently repeats all merge proofs. Deterministic or ambiguous failures remain red for investigation rather than being retried until green.
+
 ## Control-plane change policy
 
-The governance policy, implementation, tests, and privileged workflow are themselves protected from autonomous dependency changes. Modifying this control plane requires normal human-reviewed repository change management and must pass the governance self-test plus the repository's standard CI/security/documentation workflows.
+The governance policy, recovery policy/configuration, implementations, tests, Dependabot configuration, and privileged workflow are themselves protected from autonomous dependency changes. Modifying this control plane requires normal human-reviewed repository change management and must pass the governance self-test plus the repository's standard CI/security/documentation workflows.
 
 The intended operating principle is simple: automate repetitive maintenance, never automate uncertainty.
