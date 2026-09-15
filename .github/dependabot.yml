@@ -8,6 +8,7 @@ updates:
       time: "09:00"
       timezone: "America/New_York"
     open-pull-requests-limit: 10
+    rebase-strategy: auto
     groups:
       routine-dependencies:
         patterns: ["*"]
@@ -24,6 +25,7 @@ updates:
       time: "09:00"
       timezone: "America/New_York"
     open-pull-requests-limit: 10
+    rebase-strategy: auto
     ignore:
       - dependency-name: "node"
         update-types:
@@ -44,6 +46,7 @@ updates:
       time: "09:00"
       timezone: "America/New_York"
     open-pull-requests-limit: 5
+    rebase-strategy: auto
     groups:
       routine-actions:
         patterns: ["*"]
