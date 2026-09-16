@@ -119,8 +119,8 @@ For the complete command reference, runtime variables, native Supertest surface,
 
 | Stable status | Responsibility |
 | --- | --- |
-| `ci-gate` | Component/transport/Pact/listener/package evidence needed for the primary quality conclusion |
-| `extended-gate` | Runtime/integration compatibility breadth |
+| `ci-gate` | Component/transport/Pact coverage plus packaged-runtime evidence for the primary quality conclusion |
+| `extended-gate` | Real loopback-listener compatibility across the supported Node runtime matrix |
 | `security-gate` | CodeQL, npm Audit, repository/image Trivy, and Dependency Review when available |
 
 Workflow definitions: [`ci.yml`](.github/workflows/ci.yml) · [`extended.yml`](.github/workflows/extended.yml) · [`security.yml`](.github/workflows/security.yml) · [`docs.yml`](.github/workflows/docs.yml).
