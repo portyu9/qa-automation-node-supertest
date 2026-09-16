@@ -13,6 +13,20 @@ const PAGE_SIZE = 100;
 const TERMINAL_NONBLOCKING_CONCLUSIONS = new Set(['success', 'skipped']);
 const LOG_TIMESTAMP = /^\uFEFF?(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)\s/;
 
+// Configuration may narrow this set, but it cannot expand recovery authority.
+// Any new recoverable step therefore requires a protected policy-code change.
+const SAFE_TRANSIENT_STEPS = new Set([
+  'Checkout',
+  'Set up Node.js',
+  'Pin npm toolchain',
+  'Run npm ci --ignore-scripts --no-audit --no-fund',
+  'Upload coverage and contract evidence',
+  'Upload extended evidence',
+  'Upload npm audit evidence',
+  'Upload repository security evidence',
+  'Upload container security evidence',
+]);
+
 const NON_TRANSIENT_LOG_SIGNATURES = [
   { id: 'npm-resolution', pattern: /\b(?:ERESOLVE|ELSPROBLEMS|EBADENGINE|EUSAGE)\b/iu },
   { id: 'npm-no-matching-version', pattern: /\bNo matching version found\b/iu },
@@ -137,12 +151,8 @@ export function validateRecoveryConfig(config) {
   const errors = [];
   if (config?.schemaVersion !== 1) errors.push('schemaVersion must equal 1');
   if (typeof config?.enabled !== 'boolean') errors.push('enabled must be boolean');
-  if (
-    !Number.isInteger(config?.maxRunAttempts) ||
-    config.maxRunAttempts < 1 ||
-    config.maxRunAttempts > 3
-  ) {
-    errors.push('maxRunAttempts must be an integer from 1 to 3');
+  if (config?.maxRunAttempts !== 2) {
+    errors.push('maxRunAttempts must equal 2 so automatic recovery is capped at one rerun');
   }
   if (!Array.isArray(config?.transientSteps) || config.transientSteps.length === 0) {
     errors.push('transientSteps must be a non-empty array');
@@ -153,27 +163,9 @@ export function validateRecoveryConfig(config) {
     if (new Set(config.transientSteps).size !== config.transientSteps.length) {
       errors.push('transientSteps must not contain duplicates');
     }
-    for (const forbidden of [
-      'Run npm run check',
-      'Run Jest coverage and emit machine-readable results',
-      'Validate meaningful test, coverage, and Pact evidence',
-      'Exercise real local TCP listener with deterministic dependency',
-      'Validate meaningful listener evidence',
-      'Build tracked application image',
-      'Validate packaged test entrypoint',
-      'Audit committed dependency graph at HIGH/CRITICAL severity',
-      'Scan dependencies, configuration, and repository secrets',
-      'Require attributed repository security evidence',
-      'Scan built image',
-      'Require and summarize container security evidence',
-      'Review dependency changes',
-      'Analyze',
-      'Evaluate required CI jobs',
-      'Evaluate listener compatibility matrix',
-      'Evaluate security jobs',
-    ]) {
-      if (config.transientSteps.includes(forbidden)) {
-        errors.push(`${forbidden} must never be eligible for automatic recovery`);
+    for (const step of config.transientSteps) {
+      if (!SAFE_TRANSIENT_STEPS.has(step)) {
+        errors.push(`${step} is outside the code-level Supertest infrastructure recovery allowlist`);
       }
     }
   }
@@ -696,7 +688,7 @@ export async function runDependencyRecovery({
           }),
         );
       } catch (error) {
-        results.push({ pr: pull.number, error: error.message });
+        results.push({ pr: pull.number, error: error?.message || String(error) });
       }
     }
     core.info(JSON.stringify({ recovery: results }, null, 2));
