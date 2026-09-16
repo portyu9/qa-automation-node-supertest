@@ -194,31 +194,25 @@ const coreFixture = () => ({
 test('recovery config is bounded and infrastructure-only', () => {
   assert.deepEqual(validateRecoveryConfig(recoveryConfig), []);
   assert.equal(recoveryConfig.maxRunAttempts, 2);
-  for (const forbidden of [
-    'Run npm run check',
-    'Run Jest coverage and emit machine-readable results',
-    'Validate meaningful test, coverage, and Pact evidence',
-    'Exercise real local TCP listener with deterministic dependency',
-    'Validate meaningful listener evidence',
-    'Build tracked application image',
-    'Validate packaged test entrypoint',
-    'Audit committed dependency graph at HIGH/CRITICAL severity',
-    'Scan dependencies, configuration, and repository secrets',
-    'Scan built image',
-    'Review dependency changes',
-    'Analyze',
-    'Evaluate required CI jobs',
-    'Evaluate listener compatibility matrix',
-    'Evaluate security jobs',
-  ]) {
-    assert.equal(recoveryConfig.transientSteps.includes(forbidden), false, forbidden);
+  for (const invalidAttempts of [1, 3, 4]) {
+    assert.ok(
+      validateRecoveryConfig({ ...recoveryConfig, maxRunAttempts: invalidAttempts }).length > 0,
+      `maxRunAttempts=${invalidAttempts} must fail closed`,
+    );
   }
-  assert.ok(validateRecoveryConfig({ ...recoveryConfig, maxRunAttempts: 4 }).length > 0);
   assert.ok(
     validateRecoveryConfig({
       ...recoveryConfig,
-      transientSteps: [...recoveryConfig.transientSteps, 'Build tracked application image'],
+      transientSteps: [...recoveryConfig.transientSteps, 'Future container bootstrap'],
     }).length > 0,
+    'unknown step names must require a protected policy-code change',
+  );
+  assert.ok(
+    validateRecoveryConfig({
+      ...recoveryConfig,
+      transientSteps: [...recoveryConfig.transientSteps, 'Run Jest coverage and emit machine-readable results'],
+    }).length > 0,
+    'functional test execution must remain outside the code-level allowlist',
   );
 });
 
