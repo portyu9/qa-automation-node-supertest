@@ -8,6 +8,7 @@ on:
       - '.github/dependency-recovery.json'
       - '.github/scripts/dependency-governance.mjs'
       - '.github/scripts/dependency-governance.selfcheck.mjs'
+      - '.github/scripts/dependency-governance-dataflow.selfcheck.mjs'
       - '.github/scripts/dependency-recovery-policy.mjs'
       - '.github/scripts/dependency-recovery-policy.selfcheck.mjs'
       - '.github/workflows/dependency-governance.yml'
@@ -40,7 +41,6 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  GOVERNANCE_CONFIG: .github/dependency-governance.json
   RECOVERY_CONFIG: .github/dependency-recovery.json
 
 jobs:
@@ -78,6 +78,7 @@ jobs:
         run: >-
           node --test
           .github/scripts/dependency-governance.selfcheck.mjs
+          .github/scripts/dependency-governance-dataflow.selfcheck.mjs
           .github/scripts/dependency-recovery-policy.selfcheck.mjs
 
   govern:
