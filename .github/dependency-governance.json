@@ -38,6 +38,7 @@
     ".github/dependency-recovery.json",
     ".github/scripts/dependency-governance.mjs",
     ".github/scripts/dependency-governance.selfcheck.mjs",
+    ".github/scripts/dependency-governance-dataflow.selfcheck.mjs",
     ".github/scripts/dependency-recovery-policy.mjs",
     ".github/scripts/dependency-recovery-policy.selfcheck.mjs",
     ".github/codeql-autofix.json",
