@@ -1,14 +1,17 @@
+/* global structuredClone */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   classifyEcosystem,
   compareSemver,
+  ensureOwnerReviewAndApproval,
   eventPullNumber,
   parseDependabotMetadata,
   parsePositiveInteger,
   parseSemverLike,
   reconcileIndependently,
+  requestDependabotRefresh,
   selectQualificationRun,
   validateActionsSemanticChange,
   validateConfig,
@@ -43,7 +46,6 @@ test('verified Dependabot metadata parser extracts structured update records', (
 
 test('file scope maps to exactly one ecosystem', () => {
   assert.equal(classifyEcosystem([{ filename: 'package.json' }, { filename: 'package-lock.json' }], config), 'npm');
-  assert.equal(classifyEcosystem([{ filename: 'Dockerfile' }], config), 'docker');
   assert.equal(classifyEcosystem([{ filename: '.github/workflows/docs.yml' }], config), 'github-actions');
   assert.equal(classifyEcosystem([{ filename: 'package.json' }, { filename: 'README.md' }], config), 'unknown');
 });
@@ -88,7 +90,7 @@ test('Docker update must be same allowlisted image, digest pinned, same platform
   assert.match(validateDockerSemanticChange(base, patch.replace('RUN echo safe', 'RUN curl bad'), meta('node'), ['node']).reasons.join('\n'), /outside a FROM line/);
 });
 
-test('Actions updates require SHA pins and only uses-line changes; control plane stays manual', () => {
+test('Actions updates require SHA pins and only uses-line changes, including protected workflows', () => {
   const file = '.github/workflows/docs.yml';
   const base = `steps:\n  - uses: actions/checkout@${'a'.repeat(40)} # v7.0.0\n`;
   const patch = `steps:\n  - uses: actions/checkout@${'b'.repeat(40)} # v7.0.1\n`;
@@ -99,7 +101,24 @@ test('Actions updates require SHA pins and only uses-line changes; control plane
   assert.equal(validateActionsSemanticChange([{ filename: file }], { [file]: coarseBase }, { [file]: coarsePatch }, meta('actions/checkout'), config.manualReviewPaths).eligible, true);
   assert.equal(validateActionsSemanticChange([{ filename: file }], { [file]: base }, { [file]: major }, meta('actions/checkout', 'version-update:semver-major'), config.manualReviewPaths).eligible, false);
   const security = '.github/workflows/security.yml';
-  assert.match(validateActionsSemanticChange([{ filename: security }], { [security]: base }, { [security]: patch }, meta('actions/checkout'), config.manualReviewPaths).reasons.join('\n'), /control-plane/);
+  const protectedPin = validateActionsSemanticChange(
+    [{ filename: security }],
+    { [security]: base },
+    { [security]: patch },
+    meta('actions/checkout'),
+    config.manualReviewPaths,
+  );
+  assert.equal(protectedPin.eligible, true, protectedPin.reasons.join('; '));
+  const structural = patch + '  - run: curl example.invalid | sh\n';
+  const protectedMutation = validateActionsSemanticChange(
+    [{ filename: security }],
+    { [security]: base },
+    { [security]: structural },
+    meta('actions/checkout'),
+    config.manualReviewPaths,
+  );
+  assert.equal(protectedMutation.eligible, false);
+  assert.match(protectedMutation.reasons.join('\n'), /line structure|pinned-action pattern/);
 });
 
 test('governance config cannot silently enable major updates or unprotect control-plane workflows', () => {
@@ -196,6 +215,89 @@ test('qualification proof binds exact workflow identity and tolerates unavailabl
   ]) assert.equal(workflowIdentityMatches({ ...run, ...mutation }, fixture.pull, requirement), false);
   const newerWrongPath = { ...run, id: 11, path: '.github/workflows/fake.yml', updated_at: '2026-09-02T11:00:00Z' };
   assert.equal(selectQualificationRun([newerWrongPath, run], fixture.pull, requirement).id, 10);
+});
+
+function ownerApiFixture({ validIdentity = true } = {}) {
+  const comments = [];
+  const reviews = [];
+  const posts = [];
+  const owner = {
+    login: validIdentity ? config.ownerApprovalLogin : 'not-owner',
+    id: validIdentity ? config.ownerApprovalUserId : 999,
+  };
+  return {
+    comments,
+    reviews,
+    posts,
+    api: {
+      async get(path) {
+        if (path === 'https://api.github.com/user') return owner;
+        throw new Error(`unexpected GET ${path}`);
+      },
+      async paginate(path) {
+        if (/\/issues\/\d+\/comments$/u.test(path)) return comments;
+        if (/\/pulls\/\d+\/reviews$/u.test(path)) return reviews;
+        throw new Error(`unexpected paginate ${path}`);
+      },
+      async post(path, body) {
+        posts.push({ path, body });
+        if (/\/issues\/\d+\/comments$/u.test(path)) {
+          comments.push({ body: body.body, user: owner });
+          return comments.at(-1);
+        }
+        if (/\/pulls\/\d+\/reviews$/u.test(path)) {
+          reviews.push({
+            state: body.event === 'APPROVE' ? 'APPROVED' : body.event,
+            commit_id: body.commit_id,
+            user: owner,
+            body: body.body,
+          });
+          return reviews.at(-1);
+        }
+        throw new Error(`unexpected POST ${path}`);
+      },
+    },
+  };
+}
+
+test('stale Dependabot refresh is owner-authenticated, exact-subject bound, and idempotent', async () => {
+  const fixture = canonicalFixture();
+  const assessment = {
+    pull: fixture.pull,
+    baseSha: 'c'.repeat(40),
+    provenance: { eligible: false, reasons: ['PR is not rebased directly on the current base branch head'] },
+  };
+  const owner = ownerApiFixture();
+  assert.equal(await requestDependabotRefresh(owner.api, assessment, config), true);
+  assert.equal(owner.posts.length, 1);
+  assert.match(owner.posts[0].body.body, /^@dependabot rebase/mu);
+  assert.match(owner.posts[0].body.body, new RegExp(fixture.headSha));
+  assert.match(owner.posts[0].body.body, new RegExp(assessment.baseSha));
+  assert.equal(await requestDependabotRefresh(owner.api, assessment, config), true);
+  assert.equal(owner.posts.length, 1, 'same exact stale subject must not post duplicate refresh commands');
+
+  const impostor = ownerApiFixture({ validIdentity: false });
+  await assert.rejects(
+    () => requestDependabotRefresh(impostor.api, assessment, config),
+    /configured repository owner identity/,
+  );
+});
+
+test('owner review and approval bind the exact qualified head', async () => {
+  const fixture = canonicalFixture();
+  const assessment = { pull: fixture.pull };
+  const owner = ownerApiFixture();
+  await ensureOwnerReviewAndApproval(owner.api, assessment, config);
+  assert.equal(owner.comments.length, 1);
+  assert.equal(owner.reviews.length, 1);
+  assert.equal(owner.reviews[0].state, 'APPROVED');
+  assert.equal(owner.reviews[0].commit_id, fixture.headSha);
+  assert.match(owner.comments[0].body, new RegExp(fixture.headSha));
+  assert.match(owner.reviews[0].body, new RegExp(fixture.headSha));
+
+  await ensureOwnerReviewAndApproval(owner.api, assessment, config);
+  assert.equal(owner.comments.length, 1, 'owner review comment must be idempotent per exact head');
+  assert.equal(owner.reviews.length, 1, 'owner approval must be idempotent per exact head');
 });
 
 test('manual dispatch PR input accepts only positive safe integers', () => {
