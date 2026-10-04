@@ -11,6 +11,7 @@ import {
   parsePositiveInteger,
   parseSemverLike,
   reconcileIndependently,
+  reconcileWithBaseConvergence,
   requestDependabotRefresh,
   selectQualificationRun,
   validateActionsSemanticChange,
@@ -317,6 +318,55 @@ test('scheduled reconciliation isolates per-PR failures and reports all outcomes
   assert.deepEqual(visited, [1, 2, 3]);
   assert.deepEqual(result.results.map((item) => item.number), [1, 3]);
   assert.deepEqual(result.failures, [{ number: 2, error: 'boom' }]);
+});
+
+test('bulk reconciliation restarts from a fresh open-PR snapshot after any merge advances main', async () => {
+  let open = [{ number: 1 }, { number: 2 }];
+  const visits = [];
+  const result = await reconcileWithBaseConvergence(
+    async () => open.map((pull) => ({ ...pull })),
+    async (pull) => {
+      visits.push(pull.number);
+      if (pull.number === 2) {
+        open = open.filter((item) => item.number !== 2);
+        return { merged: true };
+      }
+      return { merged: false };
+    },
+  );
+
+  assert.deepEqual(
+    visits,
+    [1, 2, 1],
+    'PR 1 must be reassessed after PR 2 advances the base branch',
+  );
+  assert.equal(result.passes, 2);
+  assert.equal(result.failures.length, 0);
+  assert.deepEqual(
+    result.results.map((item) => [item.number, item.pass, item.result.merged]),
+    [
+      [1, 1, false],
+      [2, 1, true],
+      [1, 2, false],
+    ],
+  );
+});
+
+test('base-convergence reconciliation remains bounded and validates its pass ceiling', async () => {
+  let nextNumber = 0;
+  await assert.rejects(
+    () =>
+      reconcileWithBaseConvergence(
+        async () => [{ number: ++nextNumber }],
+        async () => ({ merged: true }),
+        { maxPasses: 2 },
+      ),
+    /convergence exceeded 2 pass/,
+  );
+  await assert.rejects(
+    () => reconcileWithBaseConvergence(async () => [], async () => ({}), { maxPasses: 0 }),
+    /maxPasses/,
+  );
 });
 
 test('privileged workflow never checks out the dependency PR head', () => {
