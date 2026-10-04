@@ -1,4 +1,4 @@
-FROM node:24.21.0-trixie-slim@sha256:db3ae80f5d8df06e04dabdf7b44cbf008d32de168205fa0294444aabbc08c590
+FROM node:24.21.0-trixie-slim@sha256:8ec5d7557396cfe32d21c3f9c13072355ceab22b584578ca4bb28af31120cffe
 
 ARG GZIP_VERSION=1.13-1+deb13u1
 ARG PCRE2_VERSION=10.46-1~deb13u3
