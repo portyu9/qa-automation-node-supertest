@@ -353,10 +353,11 @@ test('bulk reconciliation restarts from a fresh open-PR snapshot after any merge
 });
 
 test('base-convergence reconciliation remains bounded and validates its pass ceiling', async () => {
+  let nextNumber = 0;
   await assert.rejects(
     () =>
       reconcileWithBaseConvergence(
-        async () => [{ number: 1 }],
+        async () => [{ number: ++nextNumber }],
         async () => ({ merged: true }),
         { maxPasses: 2 },
       ),
