@@ -187,6 +187,21 @@ if (aptUpdates.length > 0) {
   }
 }
 
+for (const [arg, packageName, version] of [
+  ['NPM_BRACE_EXPANSION_VERSION', 'brace-expansion', '5.0.12'],
+  ['NPM_UNDICI_VERSION', 'undici', '6.28.1'],
+]) {
+  if (!dockerfile.includes(`ARG ${arg}=${version}`)) {
+    errors.push(`Dockerfile must pin bundled npm remediation ${packageName}@${version}`);
+  }
+  if (!dockerfile.includes(`"${packageName}@\${${arg}}"`)) {
+    errors.push(`Dockerfile must install exact bundled npm remediation for ${packageName}`);
+  }
+  if (!dockerfile.includes(`/usr/local/lib/node_modules/npm/node_modules/${packageName}/package.json`)) {
+    errors.push(`Dockerfile must verify bundled npm remediation for ${packageName}`);
+  }
+}
+
 const packageManager = packageJson.packageManager;
 const npmMatch = typeof packageManager === 'string' ? /^npm@(\d+\.\d+\.\d+)$/.exec(packageManager) : null;
 if (!npmMatch) {
