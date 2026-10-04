@@ -556,7 +556,7 @@ async function recoverPull({
       pr: number,
       skipped: true,
       reason: staleOnly
-        ? 'waiting for Dependabot native auto-rebase; controller never mutates Dependabot branches'
+        ? 'waiting for owner-authenticated Dependabot rebase; controller never mutates Dependabot branches'
         : 'recovery scope is not eligible',
       scope,
     };
