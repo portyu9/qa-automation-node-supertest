@@ -156,8 +156,10 @@ if (forbiddenOsMutations.some((pattern) => pattern.test(dockerfile))) {
 
 const governedOsFixes = [
   ['GZIP_VERSION', 'gzip', '1.13-1+deb13u1'],
-  ['PCRE2_VERSION', 'libpcre2-8-0', '10.46-1~deb13u2'],
+  ['PCRE2_VERSION', 'libpcre2-8-0', '10.46-1~deb13u3'],
   ['SQLITE3_VERSION', 'libsqlite3-0', '3.46.1-7+deb13u2'],
+  ['LIBSSL_VERSION', 'libssl3t64', '3.5.7-1~deb13u3'],
+  ['OPENSSL_LEGACY_VERSION', 'openssl-provider-legacy', '3.5.7-1~deb13u3'],
   ['PERL_BASE_VERSION', 'perl-base', '5.40.1-6+deb13u1'],
 ];
 const aptUpdates = [...dockerfile.matchAll(/\bapt(?:-get)?\s+update\b/g)];
