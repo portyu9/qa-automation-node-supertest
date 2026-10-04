@@ -28,11 +28,18 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 RUN npm install --global --ignore-scripts npm@11.21.0 --no-audit --no-fund \
     && test "$(npm --version)" = "11.21.0" \
-    && npm install --prefix /usr/local/lib/node_modules/npm --ignore-scripts --no-audit --no-fund --no-save --package-lock=false \
-      "brace-expansion@${NPM_BRACE_EXPANSION_VERSION}" \
-      "undici@${NPM_UNDICI_VERSION}" \
+    && mkdir -p /tmp/npm-security \
+    && brace_tgz="$(npm pack --silent --pack-destination /tmp/npm-security "brace-expansion@${NPM_BRACE_EXPANSION_VERSION}")" \
+    && undici_tgz="$(npm pack --silent --pack-destination /tmp/npm-security "undici@${NPM_UNDICI_VERSION}")" \
+    && rm -rf /usr/local/lib/node_modules/npm/node_modules/brace-expansion /usr/local/lib/node_modules/npm/node_modules/undici \
+    && mkdir -p /usr/local/lib/node_modules/npm/node_modules/brace-expansion /usr/local/lib/node_modules/npm/node_modules/undici \
+    && tar -xzf "/tmp/npm-security/${brace_tgz}" -C /usr/local/lib/node_modules/npm/node_modules/brace-expansion --strip-components=1 \
+    && tar -xzf "/tmp/npm-security/${undici_tgz}" -C /usr/local/lib/node_modules/npm/node_modules/undici --strip-components=1 \
+    && rm -rf /tmp/npm-security \
     && test "$(node -p "require('/usr/local/lib/node_modules/npm/node_modules/brace-expansion/package.json').version")" = "${NPM_BRACE_EXPANSION_VERSION}" \
     && test "$(node -p "require('/usr/local/lib/node_modules/npm/node_modules/undici/package.json').version")" = "${NPM_UNDICI_VERSION}" \
+    && node -e "require('/usr/local/lib/node_modules/npm/node_modules/brace-expansion')('{a,b}')" \
+    && node -e "require('/usr/local/lib/node_modules/npm/node_modules/undici')" \
     && test "$(npm --version)" = "11.21.0" \
     && npm cache clean --force
 
