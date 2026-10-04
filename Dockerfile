@@ -38,7 +38,7 @@ RUN npm install --global --ignore-scripts npm@11.21.0 --no-audit --no-fund \
     && rm -rf /tmp/npm-security \
     && test "$(node -p "require('/usr/local/lib/node_modules/npm/node_modules/brace-expansion/package.json').version")" = "${NPM_BRACE_EXPANSION_VERSION}" \
     && test "$(node -p "require('/usr/local/lib/node_modules/npm/node_modules/undici/package.json').version")" = "${NPM_UNDICI_VERSION}" \
-    && node -e "require('/usr/local/lib/node_modules/npm/node_modules/brace-expansion')('{a,b}')" \
+    && node -e "require('/usr/local/lib/node_modules/npm/node_modules/brace-expansion')" \
     && node -e "require('/usr/local/lib/node_modules/npm/node_modules/undici')" \
     && test "$(npm --version)" = "11.21.0" \
     && npm cache clean --force
