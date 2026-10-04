@@ -725,6 +725,57 @@ export async function reconcileIndependently(pulls, processor) {
   return { results, failures };
 }
 
+export async function reconcileWithBaseConvergence(
+  listPulls,
+  processor,
+  { maxPasses = 100 } = {},
+) {
+  if (typeof listPulls !== 'function') throw new Error('listPulls must be a function');
+  if (typeof processor !== 'function') throw new Error('processor must be a function');
+  if (!Number.isInteger(maxPasses) || maxPasses < 1 || maxPasses > 1000) {
+    throw new Error('maxPasses must be an integer from 1 to 1000');
+  }
+
+  const results = [];
+  const failures = [];
+  const mergedNumbers = new Set();
+
+  for (let pass = 1; pass <= maxPasses; pass += 1) {
+    const pulls = await listPulls();
+    if (!Array.isArray(pulls)) throw new Error('listPulls must return an array');
+
+    const candidates = pulls.filter(
+      (pull) => Number.isInteger(pull?.number) && !mergedNumbers.has(pull.number),
+    );
+    if (candidates.length === 0) {
+      return { results, failures, passes: pass };
+    }
+
+    let baseAdvanced = false;
+    for (const pull of candidates) {
+      try {
+        const result = await processor(pull);
+        results.push({ number: pull.number, result, pass });
+        if (result?.merged === true) {
+          mergedNumbers.add(pull.number);
+          baseAdvanced = true;
+          break;
+        }
+      } catch (error) {
+        failures.push({
+          number: pull.number,
+          error: error?.message || String(error),
+          pass,
+        });
+      }
+    }
+
+    if (!baseAdvanced) return { results, failures, passes: pass };
+  }
+
+  throw new Error(`dependency governance convergence exceeded ${maxPasses} pass(es)`);
+}
+
 export function eventPullNumber(event, eventName) {
   if (eventName === 'pull_request_target' || eventName === 'pull_request') {
     return event.pull_request?.number || null;
@@ -1446,23 +1497,35 @@ async function main() {
   const allowMerge = process.env.ALLOW_MERGE === 'true';
 
   if (eventName === 'schedule' || eventName === 'push') {
-    const pulls = await api.paginate('/pulls?state=open');
-    const dependabotPulls = pulls.filter(
-      (pull) => pull.user?.login === config.botLogin && pull.user?.id === config.botUserId,
-    );
-    const reconciliation = await reconcileIndependently(dependabotPulls, (pull) =>
-      processPull(api, ownerApi, pull.number, config, { allowMerge, includeQualification: true }),
+    const listDependabotPulls = async () => {
+      const pulls = await api.paginate('/pulls?state=open');
+      return pulls.filter(
+        (pull) => pull.user?.login === config.botLogin && pull.user?.id === config.botUserId,
+      );
+    };
+    const reconciliation = await reconcileWithBaseConvergence(
+      listDependabotPulls,
+      (pull) =>
+        processPull(api, ownerApi, pull.number, config, {
+          allowMerge,
+          includeQualification: true,
+        }),
+      { maxPasses: 100 },
     );
     console.log(
       JSON.stringify(
-        { reconciled: reconciliation.results.length, failed: reconciliation.failures },
+        {
+          reconciled: reconciliation.results.length,
+          passes: reconciliation.passes,
+          failed: reconciliation.failures,
+        },
         null,
         2,
       ),
     );
     if (reconciliation.failures.length) {
       throw new Error(
-        `scheduled dependency governance failed for ${reconciliation.failures.length} PR(s)`,
+        `scheduled dependency governance failed for ${reconciliation.failures.length} PR attempt(s)`,
       );
     }
     return;
