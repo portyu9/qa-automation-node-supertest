@@ -156,8 +156,10 @@ if (forbiddenOsMutations.some((pattern) => pattern.test(dockerfile))) {
 
 const governedOsFixes = [
   ['GZIP_VERSION', 'gzip', '1.13-1+deb13u1'],
-  ['PCRE2_VERSION', 'libpcre2-8-0', '10.46-1~deb13u2'],
+  ['PCRE2_VERSION', 'libpcre2-8-0', '10.46-1~deb13u3'],
   ['SQLITE3_VERSION', 'libsqlite3-0', '3.46.1-7+deb13u2'],
+  ['LIBSSL_VERSION', 'libssl3t64', '3.5.7-1~deb13u3'],
+  ['OPENSSL_LEGACY_VERSION', 'openssl-provider-legacy', '3.5.7-1~deb13u3'],
   ['PERL_BASE_VERSION', 'perl-base', '5.40.1-6+deb13u1'],
 ];
 const aptUpdates = [...dockerfile.matchAll(/\bapt(?:-get)?\s+update\b/g)];
@@ -182,6 +184,21 @@ if (aptUpdates.length > 0) {
     if (!dockerfile.includes(`dpkg-query -W -f='\${Version}' ${packageName}`)) {
       errors.push(`Dockerfile must verify the installed ${packageName} version`);
     }
+  }
+}
+
+for (const [arg, packageName, version] of [
+  ['NPM_BRACE_EXPANSION_VERSION', 'brace-expansion', '5.0.12'],
+  ['NPM_UNDICI_VERSION', 'undici', '6.28.1'],
+]) {
+  if (!dockerfile.includes(`ARG ${arg}=${version}`)) {
+    errors.push(`Dockerfile must pin bundled npm remediation ${packageName}@${version}`);
+  }
+  if (!dockerfile.includes(`"${packageName}@\${${arg}}"`)) {
+    errors.push(`Dockerfile must install exact bundled npm remediation for ${packageName}`);
+  }
+  if (!dockerfile.includes(`/usr/local/lib/node_modules/npm/node_modules/${packageName}/package.json`)) {
+    errors.push(`Dockerfile must verify bundled npm remediation for ${packageName}`);
   }
 }
 

@@ -416,7 +416,7 @@ test('injected-client orchestration requests exactly one canonical transient rer
   assert.equal(result.actions[0].state, 'rerun-requested');
 });
 
-test('stale canonical head waits for native Dependabot auto-rebase', async () => {
+test('stale canonical head waits for owner-authenticated Dependabot rebase', async () => {
   const fixture = canonicalFixture();
   const requirement = governanceConfig.requiredWorkflows[0];
   const { api, reruns } = fakeGithub({
@@ -437,7 +437,7 @@ test('stale canonical head waits for native Dependabot auto-rebase', async () =>
     allowRerun: true,
   });
   assert.deepEqual(reruns, []);
-  assert.match(result.reason, /auto-rebase/);
+  assert.match(result.reason, /owner-authenticated Dependabot rebase/);
 });
 
 test('dry-run explains safe recovery without mutating Actions state', async () => {
