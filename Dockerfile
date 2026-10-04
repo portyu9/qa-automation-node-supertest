@@ -6,6 +6,8 @@ ARG SQLITE3_VERSION=3.46.1-7+deb13u2
 ARG LIBSSL_VERSION=3.5.7-1~deb13u3
 ARG OPENSSL_LEGACY_VERSION=3.5.7-1~deb13u3
 ARG PERL_BASE_VERSION=5.40.1-6+deb13u1
+ARG NPM_BRACE_EXPANSION_VERSION=5.0.12
+ARG NPM_UNDICI_VERSION=6.28.1
 
 USER root
 RUN set -eux; \
@@ -25,6 +27,12 @@ RUN set -eux; \
     test "$(dpkg-query -W -f='${Version}' perl-base)" = "${PERL_BASE_VERSION}"; \
     rm -rf /var/lib/apt/lists/*
 RUN npm install --global --ignore-scripts npm@11.21.0 --no-audit --no-fund \
+    && test "$(npm --version)" = "11.21.0" \
+    && npm install --prefix /usr/local/lib/node_modules/npm --ignore-scripts --no-audit --no-fund --no-save --package-lock=false \
+      "brace-expansion@${NPM_BRACE_EXPANSION_VERSION}" \
+      "undici@${NPM_UNDICI_VERSION}" \
+    && test "$(node -p "require('/usr/local/lib/node_modules/npm/node_modules/brace-expansion/package.json').version")" = "${NPM_BRACE_EXPANSION_VERSION}" \
+    && test "$(node -p "require('/usr/local/lib/node_modules/npm/node_modules/undici/package.json').version")" = "${NPM_UNDICI_VERSION}" \
     && test "$(npm --version)" = "11.21.0" \
     && npm cache clean --force
 
