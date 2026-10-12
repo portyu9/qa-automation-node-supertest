@@ -30,5 +30,8 @@
   "devDependencies": {
     "jest": "^30.5.2"
   },
-  "packageManager": "npm@11.21.0"
+  "packageManager": "npm@11.21.0",
+  "overrides": {
+    "proxy-addr": "2.0.8"
+  }
 }
