@@ -25,7 +25,7 @@ import {
 
 const config = JSON.parse(readFileSync('.github/dependency-governance.json', 'utf8'));
 
-const meta = (name, updateType = 'version-update:semver-patch') => [{ name, version: '1.2.4', updateType }];
+const meta = (name, updateType = 'version-update:semver-patch') => [{ name, version: '1.2.4', dependencyType: 'direct:production', updateType }];
 
 test('semver parser rejects prereleases and classifies risk conservatively', () => {
   assert.deepEqual(parseSemverLike('^1.2.3'), { major: 1, minor: 2, patch: 3, raw: '^1.2.3' });
@@ -92,6 +92,34 @@ test('Dependabot generated lock root can omit trusted override mirror but not re
   assert.equal(contractMutation.eligible, false);
 });
 
+test('signed major npm version has exact metadata and immutable nondependency contract', () => {
+  const f = npmFixture('^9.32.0', '^10.0.2');
+  const signed = [{
+    name: 'express', version: '10.0.2', dependencyType: 'direct:production',
+    updateType: 'version-update:semver-major',
+  }];
+  const valid = validateNpmSemanticChange(f.basePackage, f.headPackage, f.baseLock, f.headLock, signed);
+  assert.equal(valid.eligible, true, valid.reasons.join('; '));
+  assert.equal(valid.changes[0].risk, 'major');
+
+  const spoofed = validateNpmSemanticChange(f.basePackage, f.headPackage, f.baseLock, f.headLock, [{
+    ...signed[0], version: '11.0.0',
+  }]);
+  assert.equal(spoofed.eligible, false);
+  assert.match(spoofed.reasons.join('; '), /signed version differs/);
+
+  const wrongType = validateNpmSemanticChange(f.basePackage, f.headPackage, f.baseLock, f.headLock, [{
+    ...signed[0], dependencyType: 'direct:development',
+  }]);
+  assert.equal(wrongType.eligible, false);
+  assert.match(wrongType.reasons.join('; '), /signed dependency type/);
+
+  const tampered = JSON.parse(JSON.stringify(f.headPackage));
+  tampered.scripts.test = 'unexpected';
+  const blocked = validateNpmSemanticChange(f.basePackage, tampered, f.baseLock, f.headLock, signed);
+  assert.equal(blocked.eligible, false);
+});
+
 test('npm major, scripts mutation, and newly introduced install script are blocked', () => {
   const major = npmFixture('^1.2.3', '^2.0.0');
   assert.equal(validateNpmSemanticChange(major.basePackage, major.headPackage, major.baseLock, major.headLock, meta('express', 'version-update:semver-major')).eligible, false);
@@ -147,9 +175,9 @@ test('Actions updates require SHA pins and only uses-line changes, including pro
   assert.match(protectedMutation.reasons.join('\n'), /line structure|pinned-action pattern/);
 });
 
-test('governance config cannot silently enable major updates or unprotect control-plane workflows', () => {
+test('governance config only accepts signed semantic update classes and protects control-plane workflows', () => {
   assert.deepEqual(validateConfig(config), []);
-  assert.ok(validateConfig({ ...config, allowedUpdateTypes: [...config.allowedUpdateTypes, 'version-update:semver-major'] }).length > 0);
+  assert.ok(validateConfig({ ...config, allowedUpdateTypes: [...config.allowedUpdateTypes, 'version-update:semver-prerelease'] }).length > 0);
   assert.ok(validateConfig({ ...config, manualReviewPaths: [] }).length > 0);
 });
 
@@ -208,10 +236,12 @@ test('provenance refuses spoofed bot identity, non-GitHub committer, invalid sig
   assert.match(result.reasons.join('\n'), /numeric identity|author email|materialized|signature|Signed-off-by/);
 });
 
-test('signed metadata independently refuses major update classes', () => {
+test('signed metadata recognizes major but rejects unknown update classes', () => {
   const patchCommit = { commit: { message: `x\nupdated-dependencies:\n- dependency-name: express\n  dependency-version: 5.2.2\n  dependency-type: direct:production\n  update-type: version-update:semver-patch\n...\n` } };
   const majorCommit = { commit: { message: `x\nupdated-dependencies:\n- dependency-name: express\n  dependency-version: 6.0.0\n  dependency-type: direct:production\n  update-type: version-update:semver-major\n...\n` } };
   assert.equal(validateSignedMetadata(patchCommit, config).eligible, true);
+  assert.equal(validateSignedMetadata(majorCommit, config).eligible, true);
+  majorCommit.commit.message = majorCommit.commit.message.replace('version-update:semver-major', 'version-update:unknown');
   assert.equal(validateSignedMetadata(majorCommit, config).eligible, false);
 });
 

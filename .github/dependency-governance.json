@@ -22,16 +22,34 @@
     "do-not-merge"
   ],
   "requiredWorkflows": [
-    { "workflow": "ci", "gate": "ci-gate", "file": "ci.yml" },
-    { "workflow": "extended", "gate": "extended-gate", "file": "extended.yml" },
-    { "workflow": "security", "gate": "security-gate", "file": "security.yml" },
-    { "workflow": "docs", "gate": "readme-contract", "file": "docs.yml" }
+    {
+      "workflow": "ci",
+      "gate": "ci-gate",
+      "file": "ci.yml"
+    },
+    {
+      "workflow": "extended",
+      "gate": "extended-gate",
+      "file": "extended.yml"
+    },
+    {
+      "workflow": "security",
+      "gate": "security-gate",
+      "file": "security.yml"
+    },
+    {
+      "workflow": "docs",
+      "gate": "readme-contract",
+      "file": "docs.yml"
+    }
   ],
   "allowedUpdateTypes": [
     "version-update:semver-patch",
     "version-update:semver-minor",
+    "version-update:semver-major",
     "security-update:semver-patch",
-    "security-update:semver-minor"
+    "security-update:semver-minor",
+    "security-update:semver-major"
   ],
   "manualReviewPaths": [
     ".github/workflows/security.yml",
@@ -52,11 +70,26 @@
     ".github/scripts/codeql-autofix-wrapper.selfcheck.mjs"
   ],
   "ecosystems": {
-    "npm": { "files": ["package.json", "package-lock.json"] },
-    "docker": { "files": ["Dockerfile"], "allowedImages": ["node"] },
+    "npm": {
+      "files": [
+        "package.json",
+        "package-lock.json"
+      ]
+    },
+    "docker": {
+      "files": [
+        "Dockerfile"
+      ],
+      "allowedImages": [
+        "node"
+      ]
+    },
     "github-actions": {
       "workflowPrefix": ".github/workflows/",
-      "extensions": [".yml", ".yaml"]
+      "extensions": [
+        ".yml",
+        ".yaml"
+      ]
     }
   }
 }
