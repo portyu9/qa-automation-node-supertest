@@ -130,6 +130,19 @@ function stripDependencySections(pkg) {
   return clone;
 }
 
+// The manifest, not redundant generated lock-root metadata, controls overrides.
+// Permit npm/Dependabot to omit that mirror; reject contradictory explicit pins.
+function normalizedLockRoot(root, manifest, reasons, phase) {
+  const normalized = stripDependencySections(root);
+  if (Object.hasOwn(normalized, 'overrides')) {
+    if (!jsonEqual(normalized.overrides, manifest?.overrides || {})) {
+      reasons.push(`package-lock.json ${phase} root overrides conflict with package.json`);
+    }
+    delete normalized.overrides;
+  }
+  return normalized;
+}
+
 function directDependencyMap(pkg) {
   const result = new Map();
   for (const section of DEP_SECTIONS) {
@@ -161,7 +174,7 @@ export function validateNpmSemanticChange(basePackage, headPackage, baseLock, he
   if (
     baseRoot &&
     headRoot &&
-    !jsonEqual(stripDependencySections(baseRoot), stripDependencySections(headRoot))
+    !jsonEqual(normalizedLockRoot(baseRoot, basePackage, reasons, 'base'), normalizedLockRoot(headRoot, headPackage, reasons, 'head'))
   ) {
     reasons.push('package-lock.json root package changed outside dependency declarations');
   }
