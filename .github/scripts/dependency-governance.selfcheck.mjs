@@ -67,6 +67,31 @@ test('npm patch dependency-only update is eligible', () => {
   assert.equal(result.changes[0].risk, 'patch');
 });
 
+test('Dependabot generated lock root can omit trusted override mirror but not replace security pin', () => {
+  const f = npmFixture();
+  f.basePackage.overrides = { 'proxy-addr': '2.0.8' };
+  f.headPackage.overrides = structuredClone(f.basePackage.overrides);
+  f.baseLock.packages[''].overrides = structuredClone(f.basePackage.overrides);
+  const okay = validateNpmSemanticChange(
+    f.basePackage, f.headPackage, f.baseLock, f.headLock, meta('express'),
+  );
+  assert.equal(okay.eligible, true, okay.reasons.join('; '));
+
+  f.headLock.packages[''].overrides = { 'proxy-addr': '1.0.0' };
+  const bad = validateNpmSemanticChange(
+    f.basePackage, f.headPackage, f.baseLock, f.headLock, meta('express'),
+  );
+  assert.equal(bad.eligible, false);
+  assert.match(bad.reasons.join('; '), /root overrides conflict/);
+
+  f.headLock.packages[''].overrides = structuredClone(f.basePackage.overrides);
+  f.headPackage.overrides = { 'proxy-addr': '1.0.0' };
+  const contractMutation = validateNpmSemanticChange(
+    f.basePackage, f.headPackage, f.baseLock, f.headLock, meta('express'),
+  );
+  assert.equal(contractMutation.eligible, false);
+});
+
 test('npm major, scripts mutation, and newly introduced install script are blocked', () => {
   const major = npmFixture('^1.2.3', '^2.0.0');
   assert.equal(validateNpmSemanticChange(major.basePackage, major.headPackage, major.baseLock, major.headLock, meta('express', 'version-update:semver-major')).eligible, false);
