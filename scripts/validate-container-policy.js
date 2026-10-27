@@ -189,7 +189,7 @@ if (aptUpdates.length > 0) {
 
 for (const [arg, packageName, version] of [
   ['NPM_BRACE_EXPANSION_VERSION', 'brace-expansion', '5.0.12'],
-  ['NPM_UNDICI_VERSION', 'undici', '6.28.1'],
+  ['NPM_UNDICI_VERSION', 'undici', '6.29.1'],
 ]) {
   if (!dockerfile.includes(`ARG ${arg}=${version}`)) {
     errors.push(`Dockerfile must pin bundled npm remediation ${packageName}@${version}`);
