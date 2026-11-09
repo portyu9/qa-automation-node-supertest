@@ -1,6 +1,11 @@
 FROM node:24.22.2-trixie-slim@sha256:54f84b4cf8432b21aaffd5d3ce8d41e12cea0d10d33c09d2f3c9879d49d6b446
 
 ARG GZIP_VERSION=1.13-1+deb13u1
+# Pinned Debian 13 fixes from the exact Trivy image evidence. Never suppress
+# HIGH/CRITICAL scan failures; retain exact versions as reproducible contracts.
+ARG APT_VERSION=3.0.4
+ARG LIBAPT_VERSION=3.0.4
+ARG ZLIB_VERSION=1:1.3.dfsg+really1.3.1-1+deb13u1
 ARG PCRE2_VERSION=10.46-1~deb13u3
 ARG SQLITE3_VERSION=3.46.1-7+deb13u2
 ARG LIBSSL_VERSION=3.5.7-1~deb13u3
@@ -14,12 +19,18 @@ RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
       "gzip=${GZIP_VERSION}" \
+      "apt=${APT_VERSION}" \
+      "libapt-pkg7.0=${LIBAPT_VERSION}" \
+      "zlib1g=${ZLIB_VERSION}" \
       "libpcre2-8-0=${PCRE2_VERSION}" \
       "libsqlite3-0=${SQLITE3_VERSION}" \
       "libssl3t64=${LIBSSL_VERSION}" \
       "openssl-provider-legacy=${OPENSSL_LEGACY_VERSION}" \
       "perl-base=${PERL_BASE_VERSION}"; \
     test "$(dpkg-query -W -f='${Version}' gzip)" = "${GZIP_VERSION}"; \
+    test "$(dpkg-query -W -f='${Version}' apt)" = "${APT_VERSION}"; \
+    test "$(dpkg-query -W -f='${Version}' libapt-pkg7.0)" = "${LIBAPT_VERSION}"; \
+    test "$(dpkg-query -W -f='${Version}' zlib1g)" = "${ZLIB_VERSION}"; \
     test "$(dpkg-query -W -f='${Version}' libpcre2-8-0)" = "${PCRE2_VERSION}"; \
     test "$(dpkg-query -W -f='${Version}' libsqlite3-0)" = "${SQLITE3_VERSION}"; \
     test "$(dpkg-query -W -f='${Version}' libssl3t64)" = "${LIBSSL_VERSION}"; \
