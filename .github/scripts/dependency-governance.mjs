@@ -311,7 +311,10 @@ export function validateDockerSemanticChange(baseText, headText, metadata, allow
   for (const index of differing) {
     const before = parseDockerImageReference(baseLines[index] || '');
     const after = parseDockerImageReference(headLines[index] || '');
-    if (!before || !after) continue;
+    if (!before || !after) {
+      reasons.push(`unparseable Docker FROM image at line ${index + 1}`);
+      continue;
+    }
     const shortName = after.image.split('/').at(-1);
     if (before.image !== after.image) {
       reasons.push(`container image identity changed from ${before.image} to ${after.image}`);
