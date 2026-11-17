@@ -198,6 +198,17 @@ test('signed Docker image delta projects onto unrelated current-main changes wit
     () => projectSignedDockerDelta({ ...request, signedMetadata: meta('unrelated') }),
     /ineligible/,
   );
+  const invalidFrom = signedHead.replace(newImage, 'FROM node-this-image-has-no-tag');
+  const invalidDirect = validateDockerSemanticChange(
+    old, invalidFrom, request.signedMetadata, request.allowedImages,
+  );
+  assert.equal(invalidDirect.eligible, false);
+  assert.match(invalidDirect.reasons.join('; '), /unparseable Docker FROM image/);
+  assert.throws(
+    () => projectSignedDockerDelta({ ...request, signedHeadText: invalidFrom }),
+    /ineligible/,
+  );
+
   assert.throws(
     () => projectSignedDockerDelta({ ...request, signedHeadText: signedHead.replace('sha256:' + 'b'.repeat(64), 'sha256:invalid') }),
     /ineligible/,
