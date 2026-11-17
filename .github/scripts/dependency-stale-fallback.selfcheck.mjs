@@ -128,6 +128,7 @@ function fixture({ mainText = advanced, sourceText = after, assessmentReason = '
       const pr = state.prs[0]; pr.merged = true; pr.state = 'closed';
       pr.merge_commit_sha = '9'.repeat(40); pr.merged_at = '2026-11-17T03:00:00Z';
       state.merge = pr.merge_commit_sha;
+      state.main = pr.merge_commit_sha;
       filesByRef.set(pr.merge_commit_sha, state.blobText);
       return { merged: true, sha: pr.merge_commit_sha };
     },
