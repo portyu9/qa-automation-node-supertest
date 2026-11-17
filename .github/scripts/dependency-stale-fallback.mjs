@@ -182,25 +182,45 @@ export async function runStaleDockerFallback({ api, ownerApi, assessment, config
   const lease = recreateLease({ comments, number, head, config, now });
   if (lease.state !== 'expired') return lease;
   const current = await helpers.assessPull(api, number, config, { includeQualification: false });
+  const ecosystem = current.ecosystem;
+  const filePath = current.files?.[0]?.filename;
+  const actionsPolicy = config.ecosystems?.['github-actions'];
+  const isDocker = ecosystem === 'docker' && filePath === 'Dockerfile';
+  const isActions = ecosystem === 'github-actions'
+    && WORKFLOW_PATH.test(filePath || '')
+    && typeof actionsPolicy?.workflowPrefix === 'string'
+    && filePath.startsWith(actionsPolicy.workflowPrefix)
+    && actionsPolicy.extensions?.some((extension) => filePath.endsWith(extension))
+    && !config.manualReviewPaths.includes(filePath);
   if (current.pull.state !== 'open' || current.pull.head?.sha !== head
       || current.provenance.reasons.join('|') !== 'PR is not rebased directly on the current base branch head'
-      || current.ecosystem !== 'docker' || !current.metadataAssessment.eligible
-      || current.files.length !== 1 || current.files[0].filename !== 'Dockerfile'
-      || current.files[0].status !== 'modified') fail('source changed, is untrusted, or is not a single Dockerfile-only signed proposal');
+      || !current.metadataAssessment.eligible
+      || current.files.length !== 1 || current.files[0].status !== 'modified'
+      || (!isDocker && !isActions)) {
+    fail('source changed, is untrusted, or is not one eligible signed dependency-only pin');
+  }
   const sourceBase = current.provenance.commit?.parents?.[0]?.sha;
   if (!SHA.test(sourceBase || '') || !SHA.test(head)) fail('unverifiable signed source ancestry');
   const [original, signed, live] = await Promise.all([
-    readVerifiedFile(api, sourceBase), readVerifiedFile(api, head), readVerifiedFile(api, current.baseSha),
+    readVerifiedFile(api, sourceBase, filePath), readVerifiedFile(api, head, filePath),
+    readVerifiedFile(api, current.baseSha, filePath),
   ]);
   if (current.files[0].sha !== signed.sha) fail('signed PR diff and immutable blob identity disagree');
-  const project = (a, b, c) => helpers.projectSignedDockerDelta({
-    sourceBaseText: a, signedHeadText: b, currentMainText: c,
-    signedMetadata: current.metadataAssessment.metadata,
-    allowedImages: config.ecosystems.docker.allowedImages,
-  });
+  const project = isDocker
+    ? (a, b, c) => helpers.projectSignedDockerDelta({
+      sourceBaseText: a, signedHeadText: b, currentMainText: c,
+      signedMetadata: current.metadataAssessment.metadata,
+      allowedImages: config.ecosystems.docker.allowedImages,
+    })
+    : (a, b, c) => helpers.projectSignedActionsDelta({
+      sourceBaseText: a, signedHeadText: b, currentMainText: c,
+      signedMetadata: current.metadataAssessment.metadata,
+      workflowPath: filePath,
+      manualReviewPaths: config.manualReviewPaths,
+    });
   const projected = project(original.text, signed.text, live.text);
-  const marker = sourceMarker(number, head);
-  const name = branchName(number, head);
+  const marker = sourceMarker(number, head, ecosystem);
+  const name = branchName(number, head, ecosystem);
   let revision = await maybeRef(api, name);
   let pr = await recoveryPull(api, name);
   if (pr) {
@@ -210,19 +230,19 @@ export async function runStaleDockerFallback({ api, ownerApi, assessment, config
       fail('published recovery PR has unexpected actor, source, head, or base identity');
     }
     const paths = await api.paginate('/pulls/' + pr.number + '/files');
-    if (paths.length !== 1 || paths[0]?.filename !== 'Dockerfile'
+    if (paths.length !== 1 || paths[0]?.filename !== filePath
       || paths[0]?.status !== 'modified') fail('published recovery PR changed untrusted paths');
   }
   // A recovered merge has made the source delta "already accepted", but it
   // MUST NOT shortcut exact-merge post-merge attestation and close the source.
   if (projected.state === 'already-accepted' && pr?.merged === true) {
-    const result = await postMergeProof(api, pr, config, { original: original.text, signed: signed.text, project }, now);
+    const result = await postMergeProof(api, pr, config, { original: original.text, signed: signed.text, project }, now, filePath);
     if (result.state !== 'verified') return { ...result, number: pr.number };
     const latest = await api.get('/pulls/' + number);
     if (latest.state !== 'open' || latest.head?.sha !== head) return { state: 'source-advanced-retry' };
     await api.post('/issues/' + number + '/comments', { body: marker + '\nRecovery PR #' + pr.number + ' merged at ' + pr.merge_commit_sha + '; exact-commit post-merge gates verified. Signed source blob: ' + signed.sha });
     await api.patch('/pulls/' + number, { state: 'closed' });
-    await resolveRecoveryIncident(api, number, head, 'recovery PR #' + pr.number + ', merge ' + pr.merge_commit_sha);
+    await resolveRecoveryIncident(api, number, head, 'recovery PR #' + pr.number + ', merge ' + pr.merge_commit_sha, ecosystem);
     return { state: 'verified', number: pr.number, mergeCommit: pr.merge_commit_sha };
   }
   if (projected.state === 'already-accepted') {
@@ -234,13 +254,13 @@ export async function runStaleDockerFallback({ api, ownerApi, assessment, config
     if (latest.state !== 'open' || latest.head?.sha !== head) return { state: 'source-advanced-retry' };
     await api.post('/issues/' + number + '/comments', { body: marker + '\nAccepted main already contains this exact verified signed Docker update; no duplicate PR.' });
     await api.patch('/pulls/' + number, { state: 'closed' });
-    await resolveRecoveryIncident(api, number, head, 'main ' + current.baseSha + ', Dockerfile blob ' + signed.sha);
+    await resolveRecoveryIncident(api, number, head, 'main ' + current.baseSha + ', signed dependency blob ' + signed.sha, ecosystem);
     return { state: 'already-accepted', sourceBlob: signed.sha, mainSha: current.baseSha };
   }
   if (!revision && pr && pr.merged !== true) fail('open recovery PR lost its immutable source branch');
   if (!revision) {
     if ((await baseSha(api, config.baseBranch)) !== current.baseSha) return { state: 'main-advanced-retry' };
-    revision = await createRevision(api, current.baseSha, projected.content);
+    revision = await createRevision(api, current.baseSha, projected.content, null, filePath);
     // Re-check both source and accepted main before publishing the branch.
     if ((await baseSha(api, config.baseBranch)) !== current.baseSha
       || (await api.get('/pulls/' + number)).head?.sha !== head) return { state: 'main-or-source-advanced-retry' };
@@ -264,25 +284,27 @@ export async function runStaleDockerFallback({ api, ownerApi, assessment, config
       if (!Array.isArray(prior.parents) || prior.parents.length !== 1 || !SHA.test(prior.parents[0].sha)) fail('ambiguous orphan recovery lineage');
       const ancestry = await api.get('/compare/' + prior.parents[0].sha + '...' + current.baseSha);
       if (!['ahead', 'identical'].includes(ancestry?.status)) fail('abandoned recovery parent is not an ancestor of accepted main');
-      const priorMain = await readVerifiedFile(api, prior.parents[0].sha);
+      const priorMain = await readVerifiedFile(api, prior.parents[0].sha, filePath);
       const priorProjection = project(original.text, signed.text, priorMain.text);
       if (priorProjection.state !== 'projected') fail('abandoned branch no longer represents a unique signed delta');
-      await validateUnopenedBranch(api, prior.parents[0].sha, revision, priorProjection);
-      const next = await createRevision(api, current.baseSha, projected.content, revision);
+      await validateUnopenedBranch(api, prior.parents[0].sha, revision, priorProjection, filePath);
+      const next = await createRevision(api, current.baseSha, projected.content, revision, filePath);
       await api.patch('/git/refs/heads/' + name.split('/').map(encodeURIComponent).join('/'), { sha: next, force: false });
       revision = next;
     }
-    await validateUnopenedBranch(api, current.baseSha, revision, projected);
+    await validateUnopenedBranch(api, current.baseSha, revision, projected, filePath);
     pr = await api.post('/pulls', {
-      title: 'recovery(docker): independently qualify signed Dependabot PR #' + number,
+      title: 'recovery(' + ecosystem + '): independently qualify signed Dependabot PR #' + number,
       head: name, base: config.baseBranch, draft: false,
       body: [
         marker, 'Independent recovery from a verified, immutable, GitHub-signed Dependabot source.',
         'Source PR: #' + number, 'Signed source commit: ' + head,
-        'Signed source parent: ' + sourceBase, 'Signed Dockerfile blob: ' + signed.sha,
+        'Signed source parent: ' + sourceBase, 'Signed dependency blob: ' + signed.sha,
+        'Verified recovery file: ' + filePath,
         'Accepted main at initial projection: ' + current.baseSha,
         'Recovery commit is controller-authored; it is NOT a Dependabot-signed commit.',
-        'Required: fresh exact-head CI, extended, security, docs, owner review and main verification.',
+        'Required: fresh exact-head ' + config.requiredWorkflows.map((gate) => gate.gate).join(', ')
+          + ', owner review and accepted-main verification.',
       ].join('\n\n'),
     });
     if (!Number.isSafeInteger(pr?.number)) fail('recovery PR publication has no verifiable number');
@@ -297,9 +319,9 @@ export async function runStaleDockerFallback({ api, ownerApi, assessment, config
   if (pr.merged === true) fail('merged recovery PR does not contain verified signed source update');
   if (pr.state !== 'open') fail('unexpected recovery PR state');
   if ((await baseSha(api, config.baseBranch)) !== current.baseSha) return { state: 'main-advanced-retry' };
-  let validity = await validateRecoveryBranch(api, name, pr, number, head, projected, current.baseSha, config);
+  let validity = await validateRecoveryBranch(api, name, pr, number, head, projected, current.baseSha, config, ecosystem, filePath);
   if (validity.state === 'base-advanced') {
-    const next = await createRevision(api, current.baseSha, projected.content, pr.head.sha);
+    const next = await createRevision(api, current.baseSha, projected.content, pr.head.sha, filePath);
     await api.patch('/git/refs/heads/' + name.split('/').map(encodeURIComponent).join('/'), { sha: next, force: false });
     return { state: 'recovery-rebased', number: pr.number, head: next };
   }
@@ -316,8 +338,8 @@ export async function runStaleDockerFallback({ api, ownerApi, assessment, config
   if (!(await approved())) {
     await ownerApi.post('/pulls/' + pr.number + '/reviews', {
       event: 'APPROVE', commit_id: pr.head.sha,
-      body: 'Owner approval of independently recovered signed Docker delta. Signed source ' + head
-        + '; exact recovery head ' + pr.head.sha + '; all required CI/extended/security/docs gates passed.',
+      body: 'Owner approval of independently recovered signed ' + ecosystem + ' pin. Signed source ' + head
+        + '; exact recovery head ' + pr.head.sha + '; all configured exact-head gates passed.',
     });
   }
   if (!(await approved())) fail('exact-head owner approval was not observed');
@@ -329,12 +351,12 @@ export async function runStaleDockerFallback({ api, ownerApi, assessment, config
   if (fresh.head?.sha !== pr.head.sha || fresh.state !== 'open'
     || liveSource.state !== 'open' || liveSource.head?.sha !== head
     || latestBase !== current.baseSha) return { state: 'race-retry' };
-  validity = await validateRecoveryBranch(api, name, fresh, number, head, projected, current.baseSha, config);
+  validity = await validateRecoveryBranch(api, name, fresh, number, head, projected, current.baseSha, config, ecosystem, filePath);
   if (validity.state !== 'current') return { state: 'race-retry' };
   const merged = await api.put('/pulls/' + pr.number + '/merge', {
     merge_method: config.mergeMethod, sha: pr.head.sha,
     commit_title: pr.title,
-    commit_message: 'Independent signed Docker delta recovery, exact-head qualified. Source Dependabot PR #' + number + ' at ' + head,
+    commit_message: 'Independent signed ' + ecosystem + ' pin recovery, exact-head qualified. Source Dependabot PR #' + number + ' at ' + head,
   });
   if (merged?.merged !== true || !SHA.test(merged.sha || '')) fail('exact-head recovery merge was not confirmed');
   for (const gate of config.requiredWorkflows) {
@@ -343,8 +365,8 @@ export async function runStaleDockerFallback({ api, ownerApi, assessment, config
   return { state: 'merged-awaiting-verification', number: pr.number, mergeCommit: merged.sha };
 }
 
-async function resolveRecoveryIncident(api, number, head, proof) {
-  const marker = INCIDENT + number + ':' + head + ' -->';
+async function resolveRecoveryIncident(api, number, head, proof, ecosystem = 'docker') {
+  const marker = incidentMarker(number, head, ecosystem);
   const issues = await api.paginate('/issues?state=open');
   const issue = issues.find((item) => !item.pull_request && String(item.body || '').includes(marker));
   if (!issue) return;
@@ -354,14 +376,14 @@ async function resolveRecoveryIncident(api, number, head, proof) {
   await api.patch('/issues/' + issue.number, { state: 'closed' });
 }
 
-export async function reportStaleRecoveryIncident(api, number, head, error) {
-  const marker = INCIDENT + number + ':' + head + ' -->';
+export async function reportStaleRecoveryIncident(api, number, head, error, ecosystem = 'docker') {
+  const marker = incidentMarker(number, head, ecosystem);
   const issues = await api.paginate('/issues?state=open');
   let issue = issues.find((item) => !item.pull_request && String(item.body || '').includes(marker));
   if (!issue) {
     issue = await api.post('/issues', {
-      title: 'Dependency recovery blocked: signed PR #' + number,
-      body: marker + '\n\nAutonomous Docker fallback failed closed. Governance must remain failed until independently resolved.\n\nSource: #' + number + ' at ' + head + '\n\nReason: ' + String(error.message || error).slice(0, 2000),
+      title: 'Dependency recovery blocked (' + ecosystem + '): signed PR #' + number,
+      body: marker + '\n\nAutonomous ' + ecosystem + ' fallback failed closed. Governance must remain failed until independently resolved.\n\nSource: #' + number + ' at ' + head + '\n\nReason: ' + String(error.message || error).slice(0, 2000),
     });
   }
   if (!Number.isSafeInteger(issue?.number)) fail('could not record the required tracked recovery incident');
