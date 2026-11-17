@@ -61,6 +61,10 @@ function fixture({ mainText = advanced, sourceText = after, assessmentReason = '
     root: 'https://api.github.com/repos/o/r',
     async get(path) {
       if (path === '/pulls/41') return source;
+      if (path.startsWith('/compare/')) return {
+        status: 'ahead', ahead_by: 1,
+        files: [{ filename: 'Dockerfile', status: 'modified' }],
+      };
       if (path === '/git/ref/heads/main') return { object: { sha: state.main } };
       if (path.startsWith('/git/ref/heads/')) {
         const ref = decodeURIComponent(path.slice('/git/ref/heads/'.length));
@@ -203,6 +207,23 @@ test('fresh PR only merges after all exact-head gates and owner approval; postme
   assert.equal(verified.state, 'verified');
   assert.equal(f.source.state, 'closed');
 });
+test('interrupted branch creation resumes only from exact verified Docker-only tree', async () => {
+  const f = fixture();
+  await run(f);
+  const recoveryBranch = [...f.state.refs.keys()][0];
+  f.state.prs.splice(0); // interruption after ref publication, before PR API readback
+  const resumed = await run(f);
+  assert.equal(resumed.state, 'recovery-pr-created');
+  assert.equal(f.state.refs.size, 1);
+  assert.equal(f.state.prs.length, 1);
+  const tampered = fixture();
+  await run(tampered);
+  const revision = tampered.state.refs.values().next().value;
+  tampered.state.prs.splice(0);
+  tampered.filesByRef.set(revision, before);
+  await assert.rejects(() => run(tampered), /preexisting branch is not an exact signed Dockerfile-only/);
+});
+
 test('blocked incident is idempotently tracked and never treated as a green status', async () => {
   const f = fixture();
   const first = await reportStaleRecoveryIncident(f.api, 41, head, new Error('injected provider failure'));
