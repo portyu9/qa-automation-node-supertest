@@ -96,7 +96,7 @@ function fixture({ mainText = advanced, sourceText = after, assessmentReason = '
         return [{ name: config.requiredWorkflows[n - 1].gate, status: 'completed', conclusion: 'success' }];
       }
       if (path.includes('/reviews')) return state.reviews;
-      if (path === '/issues?state=open') return state.issues || [];
+      if (path === '/issues?state=open') return (state.issues || []).filter((issue) => issue.state !== 'closed');
       throw new Error('fixture paginate ' + path);
     },
     async post(path, body) {
@@ -129,6 +129,7 @@ function fixture({ mainText = advanced, sourceText = after, assessmentReason = '
         return {};
       }
       if (path.startsWith('/pulls/')) { const pr = path === '/pulls/41' ? source : state.prs[0]; pr.state = body.state; return pr; }
+      if (path.startsWith('/issues/')) { const issue = state.issues?.find((i) => String(i.number) === path.split('/')[2]); if (!issue) throw Error('missing incident'); issue.state = body.state; return issue; }
       throw new Error('fixture patch ' + path);
     },
     async put(path, body) {
@@ -275,6 +276,17 @@ test('recovery merge attestation rejects unrelated files and forged ancestry eve
   await run(wrongPatch);
   wrongPatch.filesByRef.set(wrongPatch.state.merge, after.replace('ARG SECURITY_PIN=trusted', 'ARG SECURITY_PIN=malicious'));
   await assert.rejects(() => run(wrongPatch), /beyond the verified signed projection/);
+});
+
+test('verified acceptance autonomously closes an existing incident with an audit comment', async () => {
+  const f = fixture({ mainText: after });
+  await reportStaleRecoveryIncident(f.api, 41, head, new Error('injected stalled provider'));
+  assert.equal(f.state.issues[0].state, undefined);
+  const result = await run(f);
+  assert.equal(result.state, 'already-accepted');
+  assert.equal(f.state.issues[0].state, 'closed');
+  assert.equal(f.state.apiPosts.some((item) => item.path === '/issues/101/comments'
+    && item.body.body.includes('verified signed-source acceptance')), true);
 });
 
 test('blocked incident is idempotently tracked and never treated as a green status', async () => {
