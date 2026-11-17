@@ -205,6 +205,7 @@ export async function runStaleDockerFallback({ api, ownerApi, assessment, config
     if (latest.state !== 'open' || latest.head?.sha !== head) return { state: 'source-advanced-retry' };
     await api.post('/issues/' + number + '/comments', { body: marker + '\nRecovery PR #' + pr.number + ' merged at ' + pr.merge_commit_sha + '; exact-commit post-merge gates verified. Signed source blob: ' + signed.sha });
     await api.patch('/pulls/' + number, { state: 'closed' });
+    await resolveRecoveryIncident(api, number, head, 'recovery PR #' + pr.number + ', merge ' + pr.merge_commit_sha);
     return { state: 'verified', number: pr.number, mergeCommit: pr.merge_commit_sha };
   }
   if (projected.state === 'already-accepted') {
@@ -216,6 +217,7 @@ export async function runStaleDockerFallback({ api, ownerApi, assessment, config
     if (latest.state !== 'open' || latest.head?.sha !== head) return { state: 'source-advanced-retry' };
     await api.post('/issues/' + number + '/comments', { body: marker + '\nAccepted main already contains this exact verified signed Docker update; no duplicate PR.' });
     await api.patch('/pulls/' + number, { state: 'closed' });
+    await resolveRecoveryIncident(api, number, head, 'main ' + current.baseSha + ', Dockerfile blob ' + signed.sha);
     return { state: 'already-accepted', sourceBlob: signed.sha, mainSha: current.baseSha };
   }
   if (!revision && pr && pr.merged !== true) fail('open recovery PR lost its immutable source branch');
@@ -313,6 +315,17 @@ export async function runStaleDockerFallback({ api, ownerApi, assessment, config
     await api.post('/actions/workflows/' + encodeURIComponent(gate.file) + '/dispatches', { ref: config.baseBranch });
   }
   return { state: 'merged-awaiting-verification', number: pr.number, mergeCommit: merged.sha };
+}
+
+async function resolveRecoveryIncident(api, number, head, proof) {
+  const marker = INCIDENT + number + ':' + head + ' -->';
+  const issues = await api.paginate('/issues?state=open');
+  const issue = issues.find((item) => !item.pull_request && String(item.body || '').includes(marker));
+  if (!issue) return;
+  await api.post('/issues/' + issue.number + '/comments', {
+    body: 'Autonomous incident resolved by verified signed-source acceptance: ' + proof,
+  });
+  await api.patch('/issues/' + issue.number, { state: 'closed' });
 }
 
 export async function reportStaleRecoveryIncident(api, number, head, error) {
