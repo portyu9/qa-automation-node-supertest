@@ -230,6 +230,10 @@ export async function runStaleDockerFallback({ api, ownerApi, assessment, config
     await api.post('/git/refs', { ref: 'refs/heads/' + name, sha: revision });
   }
   if (!pr) {
+    const sourceLive = await api.get('/pulls/' + number);
+    if (sourceLive.state !== 'open' || sourceLive.head?.sha !== head) {
+      return { state: 'dependabot-progressed-retry' };
+    }
     // Resume interrupted branch publication only when every tree byte and
     // the complete net branch diff are proven against latest accepted main.
     // This also refuses an attacker-precreated deterministic branch name.
@@ -300,9 +304,14 @@ export async function runStaleDockerFallback({ api, ownerApi, assessment, config
     });
   }
   if (!(await approved())) fail('exact-head owner approval was not observed');
-  const fresh = await api.get('/pulls/' + pr.number);
+  const [fresh, liveSource, latestBase] = await Promise.all([
+    api.get('/pulls/' + pr.number),
+    api.get('/pulls/' + number),
+    baseSha(api, config.baseBranch),
+  ]);
   if (fresh.head?.sha !== pr.head.sha || fresh.state !== 'open'
-    || (await baseSha(api, config.baseBranch)) !== current.baseSha) return { state: 'race-retry' };
+    || liveSource.state !== 'open' || liveSource.head?.sha !== head
+    || latestBase !== current.baseSha) return { state: 'race-retry' };
   validity = await validateRecoveryBranch(api, name, fresh, number, head, projected, current.baseSha, config);
   if (validity.state !== 'current') return { state: 'race-retry' };
   const merged = await api.put('/pulls/' + pr.number + '/merge', {
