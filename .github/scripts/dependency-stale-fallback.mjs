@@ -223,7 +223,7 @@ export async function runStaleDockerFallback({ api, ownerApi, assessment, config
       if (priorProjection.state !== 'projected') fail('abandoned branch no longer represents a unique signed delta');
       await validateUnopenedBranch(api, prior.parents[0].sha, revision, priorProjection);
       const next = await createRevision(api, current.baseSha, projected.content, revision);
-      await api.patch(fullPath(name), { sha: next, force: false });
+      await api.patch('/git/refs/heads/' + name.split('/').map(encodeURIComponent).join('/'), { sha: next, force: false });
       revision = next;
     }
     await validateUnopenedBranch(api, current.baseSha, revision, projected);
