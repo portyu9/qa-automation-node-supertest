@@ -10,6 +10,7 @@ import {
   eventPullNumber,
   parseDependabotMetadata,
   parsePositiveInteger,
+  projectSignedDockerDelta,
   parseSemverLike,
   reconcileIndependently,
   reconcileWithBaseConvergence,
@@ -145,6 +146,102 @@ test('Docker update must be same allowlisted image, digest pinned, same platform
   assert.equal(validateDockerSemanticChange(base, major, meta('node', 'version-update:semver-major'), ['node']).eligible, false);
   assert.match(validateDockerSemanticChange(base, platform, meta('node'), ['node']).reasons.join('\n'), /platform suffix changed/);
   assert.match(validateDockerSemanticChange(base, patch.replace('RUN echo safe', 'RUN curl bad'), meta('node'), ['node']).reasons.join('\n'), /outside a FROM line/);
+});
+
+
+test('signed Docker image delta projects onto unrelated current-main changes without untrusted edits', () => {
+  const oldImage = 'FROM node:24.22.2-trixie-slim@sha256:' + 'a'.repeat(64);
+  const newImage = 'FROM node:24.22.3-trixie-slim@sha256:' + 'b'.repeat(64);
+  const old = [oldImage, '', 'ARG DEBIAN_PIN=old', ''].join('\n');
+  const signedHead = old.replace(oldImage, newImage);
+  const advancedMain = old.replace('ARG DEBIAN_PIN=old', 'ARG DEBIAN_PIN=reviewed');
+  const request = {
+    sourceBaseText: old,
+    signedHeadText: signedHead,
+    currentMainText: advancedMain,
+    signedMetadata: [{ name: 'node', version: '24.22.3-trixie-slim', updateType: 'version-update:semver-patch' }],
+    allowedImages: config.ecosystems.docker.allowedImages,
+  };
+  const outcome = projectSignedDockerDelta(request);
+  assert.equal(outcome.state, 'projected');
+  assert.equal(outcome.index, 0);
+  assert.equal(outcome.content, advancedMain.replace(oldImage, newImage));
+  assert.match(outcome.content, /DEBIAN_PIN=reviewed/);
+  assert.equal(outcome.changes[0].risk, 'patch');
+
+  // The same signed update must not create a second branch after accepted main advances.
+  const already = projectSignedDockerDelta({ ...request, currentMainText: outcome.content });
+  assert.equal(already.state, 'already-accepted');
+  assert.equal(already.content, outcome.content);
+
+  const conflict = advancedMain.replace(oldImage, oldImage.replace('24.22.2', '24.22.4'));
+  assert.throws(
+    () => projectSignedDockerDelta({ ...request, currentMainText: conflict }),
+    /conflicts/,
+  );
+  assert.throws(
+    () => projectSignedDockerDelta({
+      ...request,
+      currentMainText: advancedMain.replace('ARG DEBIAN_PIN=reviewed', 'ARG EXTRA=1\nARG DEBIAN_PIN=reviewed'),
+    }),
+    /line structure/,
+  );
+  assert.throws(
+    () => projectSignedDockerDelta({
+      ...request,
+      signedMetadata: [{ name: 'node', version: '24.22.3', updateType: 'version-update:semver-patch' }],
+    }),
+    /must exactly match/,
+  );
+  assert.throws(
+    () => projectSignedDockerDelta({
+      ...request,
+      signedMetadata: [...request.signedMetadata, ...request.signedMetadata],
+    }),
+    /must exactly match/,
+  );
+  // Any signed commit that also changes a non-FROM line is not an eligible bot source.
+  assert.throws(
+    () => projectSignedDockerDelta({
+      ...request,
+      signedHeadText: signedHead.replace('ARG DEBIAN_PIN=old', 'ARG DEBIAN_PIN=malicious'),
+    }),
+    /ineligible/,
+  );
+  assert.throws(
+    () => projectSignedDockerDelta({ ...request, signedMetadata: meta('unrelated') }),
+    /ineligible/,
+  );
+  const invalidFrom = signedHead.replace(newImage, 'FROM node-this-image-has-no-tag');
+  const invalidDirect = validateDockerSemanticChange(
+    old, invalidFrom, request.signedMetadata, request.allowedImages,
+  );
+  assert.equal(invalidDirect.eligible, false);
+  assert.match(invalidDirect.reasons.join('; '), /unparseable Docker FROM image/);
+  assert.throws(
+    () => projectSignedDockerDelta({ ...request, signedHeadText: invalidFrom }),
+    /ineligible/,
+  );
+
+  assert.throws(
+    () => projectSignedDockerDelta({ ...request, signedHeadText: signedHead.replace('sha256:' + 'b'.repeat(64), 'sha256:invalid') }),
+    /ineligible/,
+  );
+  assert.throws(
+    () => projectSignedDockerDelta({ ...request, currentMainText: advancedMain.replace(/\n/g, '\r\n') }),
+    /exact UTF-8 LF/,
+  );
+  const secondOld = 'FROM node:22.22.2-trixie-slim@sha256:' + 'c'.repeat(64);
+  const secondNew = 'FROM node:22.22.3-trixie-slim@sha256:' + 'd'.repeat(64);
+  assert.throws(
+    () => projectSignedDockerDelta({
+      ...request,
+      sourceBaseText: old + secondOld + '\n',
+      signedHeadText: signedHead + secondNew + '\n',
+      currentMainText: advancedMain + secondOld + '\n',
+    }),
+    /exactly one signed image-line/,
+  );
 });
 
 test('Actions updates require SHA pins and only uses-line changes, including protected workflows', () => {
