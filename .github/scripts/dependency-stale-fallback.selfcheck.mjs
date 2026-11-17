@@ -135,6 +135,7 @@ function fixture({ mainText = advanced, sourceText = after, assessmentReason = '
       if (!path.endsWith('/merge')) throw new Error('unexpected mutation');
       const pr = state.prs[0]; pr.merged = true; pr.state = 'closed';
       pr.merge_commit_sha = '9'.repeat(40); pr.merged_at = '2026-11-17T03:00:00Z';
+      state.parents.set(pr.merge_commit_sha, [{ sha: state.main }, { sha: pr.head.sha }]);
       state.merge = pr.merge_commit_sha;
       state.main = pr.merge_commit_sha;
       filesByRef.set(pr.merge_commit_sha, state.blobText);
@@ -255,6 +256,25 @@ test('main advancing during an open recovery PR reprojects without force-pushing
   assert.notEqual(f.state.prs[0].head.sha, beforeHead);
   assert.match(f.state.blobText, /newly-accepted-pin/);
   assert.equal(f.state.reviews.length, 0, 'old checks/approval never authorize the new commit');
+});
+
+test('recovery merge attestation rejects unrelated files and forged ancestry even with green gates', async () => {
+  const wrongActor = fixture();
+  await run(wrongActor);
+  wrongActor.state.prs[0].user.id = 13;
+  await assert.rejects(() => run(wrongActor), /unexpected actor/);
+  const wrongAncestry = fixture();
+  await run(wrongAncestry);
+  wrongAncestry.state.status = 'passed';
+  await run(wrongAncestry);
+  wrongAncestry.state.parents.set(wrongAncestry.state.merge, [{ sha: wrongAncestry.state.main }]);
+  await assert.rejects(() => run(wrongAncestry), /accepted-main parents/);
+  const wrongPatch = fixture();
+  await run(wrongPatch);
+  wrongPatch.state.status = 'passed';
+  await run(wrongPatch);
+  wrongPatch.filesByRef.set(wrongPatch.state.merge, after.replace('ARG SECURITY_PIN=trusted', 'ARG SECURITY_PIN=malicious'));
+  await assert.rejects(() => run(wrongPatch), /beyond the verified signed projection/);
 });
 
 test('blocked incident is idempotently tracked and never treated as a green status', async () => {
