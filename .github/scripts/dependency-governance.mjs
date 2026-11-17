@@ -1737,13 +1737,13 @@ async function processPull(api, ownerApi, number, config, { allowMerge, includeQ
   try {
     fallbackResult = await runStaleDockerFallback({
       api, ownerApi, assessment, config, allowMerge,
-      helpers: { verifyOwnerIdentity, assessPull, projectSignedDockerDelta, qualificationForHead },
+      helpers: { verifyOwnerIdentity, assessPull, projectSignedDockerDelta, projectSignedActionsDelta, qualificationForHead },
     });
   } catch (error) {
     // Governance MUST fail and record a durable incident after an expired
     // native lease; a successful hourly scheduler is not a recovery outcome.
     const incident = await reportStaleRecoveryIncident(
-      api, number, assessment.pull.head?.sha, error,
+      api, number, assessment.pull.head?.sha, error, assessment.ecosystem,
     );
     throw new Error('Dependency fallback incident #' + incident.incident + ': ' + error.message);
   }
