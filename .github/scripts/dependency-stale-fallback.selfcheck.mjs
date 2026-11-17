@@ -104,7 +104,7 @@ function fixture({ mainText = advanced, sourceText = after, assessmentReason = '
       if (path === '/git/blobs') { state.blobText = body.content; return { sha: sha(body.content) }; }
       if (path === '/git/trees') return { sha: 'e'.repeat(40) };
       if (path === '/git/commits') {
-        const revision = 'c'.repeat(40);
+        const revision = state.parents?.size ? '8'.repeat(40) : 'c'.repeat(40);
         if (!state.parents) state.parents = new Map();
         state.parents.set(revision, body.parents.map((s) => ({ sha: s })));
         filesByRef.set(revision, state.blobText);
@@ -123,7 +123,11 @@ function fixture({ mainText = advanced, sourceText = after, assessmentReason = '
       return {};
     },
     async patch(path, body) {
-      if (path.startsWith('/git/refs/')) { state.refs.set(recoveryBranch, body.sha); state.prs[0].head.sha = body.sha; return {}; }
+      if (path.startsWith('/git/refs/')) {
+        state.refs.set(recoveryBranch, body.sha);
+        if (state.prs[0]) state.prs[0].head.sha = body.sha;
+        return {};
+      }
       if (path.startsWith('/pulls/')) { const pr = path === '/pulls/41' ? source : state.prs[0]; pr.state = body.state; return pr; }
       throw new Error('fixture patch ' + path);
     },
@@ -222,6 +226,35 @@ test('interrupted branch creation resumes only from exact verified Docker-only t
   tampered.state.prs.splice(0);
   tampered.filesByRef.set(revision, before);
   await assert.rejects(() => run(tampered), /preexisting branch is not an exact signed Dockerfile-only/);
+});
+
+test('main advancing after an orphaned branch safely reprojects, preserves accepted pins, and publishes once', async () => {
+  const f = fixture();
+  await run(f);
+  const old = f.state.refs.values().next().value;
+  f.state.prs.splice(0);
+  f.state.main = 'f'.repeat(40);
+  const newer = advanced.replace('accepted-change', 'newly-accepted-pin');
+  f.filesByRef.set(f.state.main, newer);
+  const outcome = await run(f);
+  assert.equal(outcome.state, 'recovery-pr-created');
+  assert.equal(f.state.prs.length, 1);
+  assert.notEqual(f.state.refs.values().next().value, old);
+  assert.match(f.state.blobText, /newly-accepted-pin/);
+});
+
+test('main advancing during an open recovery PR reprojects without force-pushing or merging stale checks', async () => {
+  const f = fixture();
+  await run(f);
+  f.state.main = 'f'.repeat(40);
+  const newer = advanced.replace('accepted-change', 'newly-accepted-pin');
+  f.filesByRef.set(f.state.main, newer);
+  const beforeHead = f.state.prs[0].head.sha;
+  const result = await run(f);
+  assert.equal(result.state, 'recovery-rebased');
+  assert.notEqual(f.state.prs[0].head.sha, beforeHead);
+  assert.match(f.state.blobText, /newly-accepted-pin/);
+  assert.equal(f.state.reviews.length, 0, 'old checks/approval never authorize the new commit');
 });
 
 test('blocked incident is idempotently tracked and never treated as a green status', async () => {
