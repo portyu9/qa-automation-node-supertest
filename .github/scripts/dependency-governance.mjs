@@ -1395,10 +1395,16 @@ export async function requestDependabotRefresh(ownerApi, assessment, config, { o
   const comments = await ownerApi.paginate(`/issues/${number}/comments`);
   // Bind the lease to the immutable signed HEAD, not to a moving accepted main.
   // Otherwise every unrelated main advance resets the timer and can stall forever.
-  const matching = (command) => comments.filter((comment) =>
-    String(comment.body || '').split('\n').some((line) =>
-      new RegExp('^<!-- dependency-owner-refresh:v1:' + headSha
-        + ':[0-9a-f]{40}:' + command + ' -->
+  const matching = (command) => comments.filter((comment) => {
+    const prefix = `${OWNER_REFRESH_MARKER}${headSha}:`;
+    const suffix = `:${command} -->`;
+    const validMarker = String(comment.body || '').split('\n').some((line) =>
+      line.startsWith(prefix) && line.endsWith(suffix)
+      && /^[0-9a-f]{40}$/.test(line.slice(prefix.length, -suffix.length)));
+    return validMarker && comment.user?.login === config.ownerApprovalLogin
+      && comment.user?.id === config.ownerApprovalUserId
+      && comment.performed_via_github_app == null;
+  });
   const priorRebases = matching('rebase');
   const priorRecreates = matching('recreate');
   if (priorRebases.length > 1 || priorRecreates.length > 1) {
