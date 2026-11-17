@@ -68,6 +68,21 @@ async function recoveryPull(api, branch) {
   if (pulls.length > 1) fail('multiple recovery PRs share the deterministic branch');
   return pulls[0] || null;
 }
+async function validateUnopenedBranch(api, base, revision, projected) {
+  if (!SHA.test(base) || !SHA.test(revision)) fail('branch publication refs are not immutable SHAs');
+  const [commit, comparison, contents] = await Promise.all([
+    api.get('/git/commits/' + revision),
+    api.get('/compare/' + base + '...' + revision),
+    readVerifiedFile(api, revision),
+  ]);
+  if (!commit?.parents?.some((p) => p.sha === base)
+    || comparison?.status !== 'ahead' || comparison?.ahead_by < 1
+    || comparison?.files?.length !== 1 || comparison.files[0]?.filename !== 'Dockerfile'
+    || comparison.files[0]?.status !== 'modified'
+    || contents.text !== projected.content) {
+    fail('preexisting branch is not an exact signed Dockerfile-only projection of accepted main');
+  }
+}
 async function createRevision(api, parent, text, prior = null) {
   const parentCommit = await api.get('/git/commits/' + parent);
   if (!SHA.test(parentCommit?.tree?.sha || '')) fail('accepted main tree is unavailable');
@@ -190,6 +205,13 @@ export async function runStaleDockerFallback({ api, ownerApi, assessment, config
     await api.post('/git/refs', { ref: 'refs/heads/' + name, sha: revision });
   }
   if (!pr) {
+    // Resume interrupted branch publication only when every tree byte and
+    // the complete net branch diff are proven against latest accepted main.
+    // This also refuses an attacker-precreated deterministic branch name.
+    if (!(await baseSha(api, config.baseBranch)).startsWith(current.baseSha)) {
+      return { state: 'main-advanced-retry' };
+    }
+    await validateUnopenedBranch(api, current.baseSha, revision, projected);
     pr = await api.post('/pulls', {
       title: 'recovery(docker): independently qualify signed Dependabot PR #' + number,
       head: name, base: config.baseBranch, draft: false,
