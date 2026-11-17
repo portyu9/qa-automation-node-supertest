@@ -76,7 +76,7 @@ async function validateUnopenedBranch(api, base, revision, projected) {
     readVerifiedFile(api, revision),
   ]);
   if (!commit?.parents?.some((p) => p.sha === base)
-    || comparison?.status !== 'ahead' || comparison?.ahead_by < 1
+    || comparison?.status !== 'ahead' || !Number.isSafeInteger(comparison?.ahead_by) || comparison.ahead_by < 1
     || comparison?.files?.length !== 1 || comparison.files[0]?.filename !== 'Dockerfile'
     || comparison.files[0]?.status !== 'modified'
     || contents.text !== projected.content) {
@@ -101,10 +101,10 @@ async function createRevision(api, parent, text, prior = null) {
   return commit.sha;
 }
 
-async function validateRecoveryBranch(api, branch, pr, number, head, projected, mainSha) {
+async function validateRecoveryBranch(api, branch, pr, number, head, projected, mainSha, config) {
   const marker = sourceMarker(number, head);
   if (!pr || !String(pr.body || '').includes(marker)
-    || pr.head?.ref !== branch || pr.base?.ref !== 'main'
+    || pr.head?.ref !== branch || pr.base?.ref !== config.baseBranch
     || pr.user?.login !== 'github-actions[bot]' || pr.user?.id !== 41898282) fail('recovery PR identity, author, or provenance marker mismatch');
   if (!SHA.test(pr.head?.sha || '')) fail('recovery PR head SHA missing');
   const commit = await api.get('/git/commits/' + pr.head.sha);
@@ -251,7 +251,7 @@ export async function runStaleDockerFallback({ api, ownerApi, assessment, config
   if (pr.merged === true) fail('merged recovery PR does not contain verified signed source update');
   if (pr.state !== 'open') fail('unexpected recovery PR state');
   if ((await baseSha(api, config.baseBranch)) !== current.baseSha) return { state: 'main-advanced-retry' };
-  let validity = await validateRecoveryBranch(api, name, pr, number, head, projected, current.baseSha);
+  let validity = await validateRecoveryBranch(api, name, pr, number, head, projected, current.baseSha, config);
   if (validity.state === 'base-advanced') {
     const next = await createRevision(api, current.baseSha, projected.content, pr.head.sha);
     await api.patch('/git/refs/heads/' + name.split('/').map(encodeURIComponent).join('/'), { sha: next, force: false });
@@ -278,7 +278,7 @@ export async function runStaleDockerFallback({ api, ownerApi, assessment, config
   const fresh = await api.get('/pulls/' + pr.number);
   if (fresh.head?.sha !== pr.head.sha || fresh.state !== 'open'
     || (await baseSha(api, config.baseBranch)) !== current.baseSha) return { state: 'race-retry' };
-  validity = await validateRecoveryBranch(api, name, fresh, number, head, projected, current.baseSha);
+  validity = await validateRecoveryBranch(api, name, fresh, number, head, projected, current.baseSha, config);
   if (validity.state !== 'current') return { state: 'race-retry' };
   const merged = await api.put('/pulls/' + pr.number + '/merge', {
     merge_method: config.mergeMethod, sha: pr.head.sha,
