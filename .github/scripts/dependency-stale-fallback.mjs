@@ -107,10 +107,10 @@ async function validateRecoveryBranch(api, branch, pr, number, head, projected, 
     || pr.head?.ref !== branch || pr.base?.ref !== 'main'
     || pr.user?.login !== 'github-actions[bot]' || pr.user?.id !== 41898282) fail('recovery PR identity, author, or provenance marker mismatch');
   if (!SHA.test(pr.head?.sha || '')) fail('recovery PR head SHA missing');
-  const files = await api.paginate('/pulls/' + pr.number + '/files');
-  if (files.length !== 1 || files[0]?.filename !== 'Dockerfile' || files[0]?.status !== 'modified') fail('recovery PR changed a non-Dockerfile path');
   const commit = await api.get('/git/commits/' + pr.head.sha);
   if (!commit?.parents?.some((p) => p.sha === mainSha)) return { state: 'base-advanced' };
+  const files = await api.paginate('/pulls/' + pr.number + '/files');
+  if (files.length !== 1 || files[0]?.filename !== 'Dockerfile' || files[0]?.status !== 'modified') fail('recovery PR changed a non-Dockerfile path');
   const actual = await readVerifiedFile(api, pr.head.sha);
   if (actual.text !== projected.content) fail('recovery PR bytes differ from independently projected signed delta');
   return { state: 'current', head: pr.head.sha };
@@ -208,8 +208,23 @@ export async function runStaleDockerFallback({ api, ownerApi, assessment, config
     // Resume interrupted branch publication only when every tree byte and
     // the complete net branch diff are proven against latest accepted main.
     // This also refuses an attacker-precreated deterministic branch name.
-    if (!(await baseSha(api, config.baseBranch)).startsWith(current.baseSha)) {
+    if ((await baseSha(api, config.baseBranch)) !== current.baseSha) {
       return { state: 'main-advanced-retry' };
+    }
+    if (revision && (await api.get('/git/commits/' + revision))?.parents?.every((p) => p.sha !== current.baseSha)) {
+      // Validate the abandoned branch against its historical accepted parent
+      // BEFORE bringing a trusted projection forward on current main.
+      const prior = await api.get('/git/commits/' + revision);
+      if (!Array.isArray(prior.parents) || prior.parents.length !== 1 || !SHA.test(prior.parents[0].sha)) fail('ambiguous orphan recovery lineage');
+      const ancestry = await api.get('/compare/' + prior.parents[0].sha + '...' + current.baseSha);
+      if (!['ahead', 'identical'].includes(ancestry?.status)) fail('abandoned recovery parent is not an ancestor of accepted main');
+      const priorMain = await readVerifiedFile(api, prior.parents[0].sha);
+      const priorProjection = project(original.text, signed.text, priorMain.text);
+      if (priorProjection.state !== 'projected') fail('abandoned branch no longer represents a unique signed delta');
+      await validateUnopenedBranch(api, prior.parents[0].sha, revision, priorProjection);
+      const next = await createRevision(api, current.baseSha, projected.content, revision);
+      await api.patch(fullPath(name), { sha: next, force: false });
+      revision = next;
     }
     await validateUnopenedBranch(api, current.baseSha, revision, projected);
     pr = await api.post('/pulls', {
