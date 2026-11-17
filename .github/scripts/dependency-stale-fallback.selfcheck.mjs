@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { recreateLease, runStaleDockerFallback, reportStaleRecoveryIncident } from './dependency-stale-fallback.mjs';
-import { projectSignedDockerDelta } from './dependency-governance.mjs';
+import { projectSignedDockerDelta, projectSignedActionsDelta } from './dependency-governance.mjs';
 
 const config = JSON.parse(readFileSync('.github/dependency-governance.json', 'utf8'));
 const head = 'b'.repeat(40), originalSha = 'a'.repeat(40), mainSha = 'd'.repeat(40);
@@ -40,22 +40,27 @@ test('ACK does not count as a regenerated signed head; identity and timestamps m
   assert.equal(recreateLease({ comments, number: 41, head: 'f'.repeat(40), config, now }).state, 'waiting-native');
 });
 
-function fixture({ mainText = advanced, sourceText = after, assessmentReason = 'PR is not rebased directly on the current base branch head', files = null } = {}) {
+function fixture({
+  mainText = advanced, sourceText = after, sourceBaseText = before,
+  assessmentReason = 'PR is not rebased directly on the current base branch head',
+  files = null, ecosystem = 'docker', filePath = 'Dockerfile',
+  metadataEntries = metadata,
+} = {}) {
   const source = {
     number: 41, state: 'open',
-    head: { sha: head, ref: 'dependabot/docker/routine' },
+    head: { sha: head, ref: ecosystem === 'docker' ? 'dependabot/docker/routine' : 'dependabot/github_actions/routine' },
     base: { ref: 'main' },
   };
   const assessment = {
     pull: source, baseSha: mainSha,
     provenance: { eligible: false, reasons: [assessmentReason], commit: { parents: [{ sha: originalSha }] } },
-    metadataAssessment: { eligible: true, metadata },
-    ecosystem: 'docker',
-    files: files || [{ filename: 'Dockerfile', status: 'modified', sha: sha(sourceText) }],
+    metadataAssessment: { eligible: true, metadata: metadataEntries },
+    ecosystem,
+    files: files || [{ filename: filePath, status: 'modified', sha: sha(sourceText) }],
   };
-  const filesByRef = new Map([[originalSha, before], [head, sourceText], [mainSha, mainText]]);
+  const filesByRef = new Map([[originalSha, sourceBaseText], [head, sourceText], [mainSha, mainText]]);
   const state = { refs: new Map(), prs: [], comments: [...comments], ownerPatches: [], apiPosts: [], reviews: [], merge: null, status: 'missing', main: mainSha, now };
-  const recoveryBranch = 'dependency-recovery/docker-pr-41-' + head.slice(0, 12);
+  const recoveryBranch = 'dependency-recovery/' + (ecosystem === 'github-actions' ? 'actions-pr-' : 'docker-pr-') + '41-' + head.slice(0, 12);
   const api = {
     owner: 'o',
     root: 'https://api.github.com/repos/o/r',
@@ -63,7 +68,7 @@ function fixture({ mainText = advanced, sourceText = after, assessmentReason = '
       if (path === '/pulls/41') return source;
       if (path.startsWith('/compare/')) return {
         status: 'ahead', ahead_by: 1,
-        files: [{ filename: 'Dockerfile', status: 'modified' }],
+        files: [{ filename: filePath, status: 'modified' }],
       };
       if (path === '/git/ref/heads/main') return { object: { sha: state.main } };
       if (path.startsWith('/git/ref/heads/')) {
@@ -71,7 +76,7 @@ function fixture({ mainText = advanced, sourceText = after, assessmentReason = '
         if (!state.refs.has(ref)) throw new Error('GitHub API GET failed (404): Not Found');
         return { object: { sha: state.refs.get(ref) } };
       }
-      if (path.startsWith('/contents/Dockerfile?ref=')) {
+      if (path.startsWith('/contents/' + filePath + '?ref=')) {
         const value = filesByRef.get(path.split('ref=')[1]);
         if (value === undefined) throw new Error('fixture unknown blob ' + path);
         return { sha: sha(value), encoding: 'base64', content: Buffer.from(value).toString('base64') };
@@ -85,7 +90,7 @@ function fixture({ mainText = advanced, sourceText = after, assessmentReason = '
     },
     async paginate(path) {
       if (path.startsWith('/pulls?')) return state.prs;
-      if (path.startsWith('/pulls/') && path.endsWith('/files')) return [{ filename: 'Dockerfile', status: 'modified' }];
+      if (path.startsWith('/pulls/') && path.endsWith('/files')) return [{ filename: filePath, status: 'modified' }];
       if (path.startsWith('/actions/runs?')) return state.status === 'verified' ? config.requiredWorkflows.map((g, i) => ({
         id: i + 1, name: g.workflow, path: '.github/workflows/' + g.file, head_sha: state.merge,
         event: 'workflow_dispatch', status: 'completed', conclusion: 'success',
@@ -160,6 +165,7 @@ function fixture({ mainText = advanced, sourceText = after, assessmentReason = '
     verifyOwnerIdentity: async () => {},
     assessPull: async () => ({ ...assessment, baseSha: state.main }),
     projectSignedDockerDelta,
+    projectSignedActionsDelta,
     qualificationForHead: async () => ({ allSuccess: state.status === 'passed', qualifications: [] }),
   };
   return { api, ownerApi, assessment, config, helpers, now, state, filesByRef, source };
@@ -191,7 +197,7 @@ test('publisher fails closed on incorrect signed blob, non-Docker changes, and s
   const wrong = fixture({ files: [{ filename: 'Dockerfile', status: 'modified', sha: 'f'.repeat(40) }] });
   await assert.rejects(() => run(wrong), /blob identity/);
   const extra = fixture({ files: [{ filename: 'package.json', status: 'modified', sha: sha(after) }] });
-  await assert.rejects(() => run(extra), /not a single Dockerfile-only/);
+  await assert.rejects(() => run(extra), /not one eligible signed dependency-only pin/);
   const conflict = fixture({ mainText: before.replace('24.22.2', '24.22.4') });
   await assert.rejects(() => run(conflict), /conflicts/);
   const unsigned = fixture({ assessmentReason: 'signature invalid' });
