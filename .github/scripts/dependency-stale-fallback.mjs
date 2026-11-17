@@ -116,11 +116,24 @@ async function validateRecoveryBranch(api, branch, pr, number, head, projected, 
   return { state: 'current', head: pr.head.sha };
 }
 
-async function postMergeProof(api, pr, config, source, readMain, now) {
+async function postMergeProof(api, pr, config, source, now) {
   if (pr.merged !== true || !SHA.test(pr.merge_commit_sha || '') || !pr.merged_at) fail('recovery PR is not provably merged');
-  const accepted = await readVerifiedFile(api, pr.merge_commit_sha);
-  const semantic = source.project(source.original, source.signed, accepted.text);
-  if (semantic.state !== 'already-accepted') fail('merged commit does not contain original signed Docker delta');
+  const merged = await api.get('/git/commits/' + pr.merge_commit_sha);
+  if (merged?.parents?.length !== 2 || !SHA.test(pr.head?.sha || '')
+    || merged.parents[1]?.sha !== pr.head.sha || !SHA.test(merged.parents[0]?.sha || '')) {
+    fail('recovery merge commit does not have the exact trusted PR head and accepted-main parents');
+  }
+  const [accepted, parent, comparison] = await Promise.all([
+    readVerifiedFile(api, pr.merge_commit_sha),
+    readVerifiedFile(api, merged.parents[0].sha),
+    api.get('/compare/' + merged.parents[0].sha + '...' + pr.merge_commit_sha),
+  ]);
+  if (comparison?.files?.length !== 1 || comparison.files[0]?.filename !== 'Dockerfile'
+    || comparison.files[0]?.status !== 'modified') fail('merged recovery changed an unrelated path');
+  const projected = source.project(source.original, source.signed, parent.text);
+  if (projected.state !== 'projected' || projected.content !== accepted.text) {
+    fail('merged Dockerfile contains edits beyond the verified signed projection');
+  }
   const runs = await api.paginate('/actions/runs?head_sha=' + pr.merge_commit_sha + '&event=workflow_dispatch', 'workflow_runs');
   const proof = [];
   for (const gate of config.requiredWorkflows) {
@@ -173,10 +186,20 @@ export async function runStaleDockerFallback({ api, ownerApi, assessment, config
   const name = branchName(number, head);
   let revision = await maybeRef(api, name);
   let pr = await recoveryPull(api, name);
+  if (pr) {
+    if (!String(pr.body || '').includes(marker)
+      || pr.head?.ref !== name || pr.base?.ref !== config.baseBranch
+      || pr.user?.login !== 'github-actions[bot]' || pr.user?.id !== 41898282) {
+      fail('published recovery PR has unexpected actor, source, head, or base identity');
+    }
+    const paths = await api.paginate('/pulls/' + pr.number + '/files');
+    if (paths.length !== 1 || paths[0]?.filename !== 'Dockerfile'
+      || paths[0]?.status !== 'modified') fail('published recovery PR changed untrusted paths');
+  }
   // A recovered merge has made the source delta "already accepted", but it
   // MUST NOT shortcut exact-merge post-merge attestation and close the source.
   if (projected.state === 'already-accepted' && pr?.merged === true) {
-    const result = await postMergeProof(api, pr, config, { original: original.text, signed: signed.text, project }, null, now);
+    const result = await postMergeProof(api, pr, config, { original: original.text, signed: signed.text, project }, now);
     if (result.state !== 'verified') return { ...result, number: pr.number };
     const latest = await api.get('/pulls/' + number);
     if (latest.state !== 'open' || latest.head?.sha !== head) return { state: 'source-advanced-retry' };
@@ -195,7 +218,7 @@ export async function runStaleDockerFallback({ api, ownerApi, assessment, config
     await api.patch('/pulls/' + number, { state: 'closed' });
     return { state: 'already-accepted', sourceBlob: signed.sha, mainSha: current.baseSha };
   }
-  if (!revision && pr) fail('recovery PR exists without its immutable source branch');
+  if (!revision && pr && pr.merged !== true) fail('open recovery PR lost its immutable source branch');
   if (!revision) {
     if ((await baseSha(api, config.baseBranch)) !== current.baseSha) return { state: 'main-advanced-retry' };
     revision = await createRevision(api, current.baseSha, projected.content);
