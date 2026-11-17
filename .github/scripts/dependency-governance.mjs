@@ -414,6 +414,13 @@ export function projectSignedDockerDelta({
   if (changed.length !== 1) {
     throw new Error('Docker salvage requires exactly one signed image-line update');
   }
+  const proposed = parseDockerImageReference(signed[changed[0]]);
+  const exactMetadata = proposed && signedMetadata.filter((item) =>
+    (item.name === proposed.image || item.name === proposed.image.split('/').at(-1))
+    && item.version === proposed.tag);
+  if (!exactMetadata || exactMetadata.length !== 1) {
+    throw new Error('signed dependency metadata must exactly match one proposed Docker image tag');
+  }
   if (live.length !== original.length) {
     throw new Error('Dockerfile line structure changed on main; refuse unsafe projection');
   }
