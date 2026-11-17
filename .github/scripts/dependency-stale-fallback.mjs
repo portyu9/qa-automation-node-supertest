@@ -3,6 +3,17 @@ import { createHash } from 'node:crypto';
 const SHA = /^[0-9a-f]{40}$/;
 const MARKER = '<!-- dependency-stale-docker-recovery:v1:';
 const INCIDENT = '<!-- dependency-stale-docker-incident:v1:';
+const ACTIONS_MARKER = '<!-- dependency-stale-actions-recovery:v1:';
+const ACTIONS_INCIDENT = '<!-- dependency-stale-actions-incident:v1:';
+const WORKFLOW_PATH = /^\.github\/workflows\/[A-Za-z0-9._-]+\.ya?ml$/;
+function incidentMarker(number, head, ecosystem = 'docker') {
+  const prefix = ecosystem === 'github-actions' ? ACTIONS_INCIDENT : INCIDENT;
+  return prefix + number + ':' + head + ' -->';
+}
+function validatedFilePath(path) {
+  if (path !== 'Dockerfile' && !WORKFLOW_PATH.test(path)) fail('disallowed immutable recovery path');
+  return path;
+}
 
 function fail(message) { throw new Error('Docker fallback: ' + message); }
 function same(a, b) { return a === b && SHA.test(String(a || '')); }
@@ -10,8 +21,13 @@ function exactTime(value, now) {
   const time = typeof value === 'string' ? Date.parse(value) : NaN;
   return Number.isFinite(time) && time <= now.getTime() ? time : null;
 }
-function sourceMarker(number, head) { return MARKER + number + ':' + head + ' -->'; }
-function branchName(number, head) { return 'dependency-recovery/docker-pr-' + number + '-' + head.slice(0, 12); }
+function sourceMarker(number, head, ecosystem = 'docker') {
+  return (ecosystem === 'github-actions' ? ACTIONS_MARKER : MARKER) + number + ':' + head + ' -->';
+}
+function branchName(number, head, ecosystem = 'docker') {
+  const prefix = ecosystem === 'github-actions' ? 'actions-pr-' : 'docker-pr-';
+  return 'dependency-recovery/' + prefix + number + '-' + head.slice(0, 12);
+}
 function fullPath(branch) { return '/git/ref/heads/' + branch.split('/').map(encodeURIComponent).join('/'); }
 
 export function recreateLease({ comments, number, head, config, now = new Date() }) {
@@ -42,9 +58,10 @@ function blobSha(content) {
   const bytes = Buffer.from(content, 'utf8');
   return createHash('sha1').update('blob ' + bytes.length + '\0').update(bytes).digest('hex');
 }
-async function readVerifiedFile(api, sha) {
+async function readVerifiedFile(api, sha, path = 'Dockerfile') {
   if (!SHA.test(sha)) fail('noncanonical immutable file ref');
-  const file = await api.get('/contents/Dockerfile?ref=' + sha);
+  const safe = validatedFilePath(path).split('/').map(encodeURIComponent).join('/');
+  const file = await api.get('/contents/' + safe + '?ref=' + sha);
   if (file?.encoding !== 'base64' || !SHA.test(file?.sha || '') || typeof file.content !== 'string') fail('invalid GitHub contents object');
   const bytes = Buffer.from(file.content.replace(/\s/g, ''), 'base64');
   const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
@@ -68,41 +85,41 @@ async function recoveryPull(api, branch) {
   if (pulls.length > 1) fail('multiple recovery PRs share the deterministic branch');
   return pulls[0] || null;
 }
-async function validateUnopenedBranch(api, base, revision, projected) {
+async function validateUnopenedBranch(api, base, revision, projected, filePath = 'Dockerfile') {
   if (!SHA.test(base) || !SHA.test(revision)) fail('branch publication refs are not immutable SHAs');
   const [commit, comparison, contents] = await Promise.all([
     api.get('/git/commits/' + revision),
     api.get('/compare/' + base + '...' + revision),
-    readVerifiedFile(api, revision),
+    readVerifiedFile(api, revision, filePath),
   ]);
   if (!commit?.parents?.some((p) => p.sha === base)
     || comparison?.status !== 'ahead' || !Number.isSafeInteger(comparison?.ahead_by) || comparison.ahead_by < 1
-    || comparison?.files?.length !== 1 || comparison.files[0]?.filename !== 'Dockerfile'
+    || comparison?.files?.length !== 1 || comparison.files[0]?.filename !== filePath
     || comparison.files[0]?.status !== 'modified'
     || contents.text !== projected.content) {
     fail('preexisting branch is not an exact signed Dockerfile-only projection of accepted main');
   }
 }
-async function createRevision(api, parent, text, prior = null) {
+async function createRevision(api, parent, text, prior = null, filePath = 'Dockerfile') {
   const parentCommit = await api.get('/git/commits/' + parent);
   if (!SHA.test(parentCommit?.tree?.sha || '')) fail('accepted main tree is unavailable');
   const blob = await api.post('/git/blobs', { content: text, encoding: 'utf-8' });
   if (!same(blob?.sha, blobSha(text))) fail('published blob is not the proven Dockerfile bytes');
   const tree = await api.post('/git/trees', {
     base_tree: parentCommit.tree.sha,
-    tree: [{ path: 'Dockerfile', mode: '100644', type: 'blob', sha: blob.sha }],
+    tree: [{ path: validatedFilePath(filePath), mode: '100644', type: 'blob', sha: blob.sha }],
   });
   if (!SHA.test(tree?.sha || '')) fail('invalid recovered tree');
   const commit = await api.post('/git/commits', {
-    message: 'recovery: project verified signed Docker update onto accepted main\n\nSource provenance is recorded in the recovery PR, not impersonated in this commit.',
+    message: 'recovery: project verified signed dependency pin onto accepted main\n\nSource provenance is recorded in the recovery PR, not impersonated in this commit.',
     tree: tree.sha, parents: prior ? [prior, parent] : [parent],
   });
   if (!SHA.test(commit?.sha || '')) fail('invalid recovered commit');
   return commit.sha;
 }
 
-async function validateRecoveryBranch(api, branch, pr, number, head, projected, mainSha, config) {
-  const marker = sourceMarker(number, head);
+async function validateRecoveryBranch(api, branch, pr, number, head, projected, mainSha, config, ecosystem = 'docker', filePath = 'Dockerfile') {
+  const marker = sourceMarker(number, head, ecosystem);
   if (!pr || !String(pr.body || '').includes(marker)
     || pr.head?.ref !== branch || pr.base?.ref !== config.baseBranch
     || pr.user?.login !== 'github-actions[bot]' || pr.user?.id !== 41898282) fail('recovery PR identity, author, or provenance marker mismatch');
@@ -110,13 +127,13 @@ async function validateRecoveryBranch(api, branch, pr, number, head, projected, 
   const commit = await api.get('/git/commits/' + pr.head.sha);
   if (!commit?.parents?.some((p) => p.sha === mainSha)) return { state: 'base-advanced' };
   const files = await api.paginate('/pulls/' + pr.number + '/files');
-  if (files.length !== 1 || files[0]?.filename !== 'Dockerfile' || files[0]?.status !== 'modified') fail('recovery PR changed a non-Dockerfile path');
-  const actual = await readVerifiedFile(api, pr.head.sha);
+  if (files.length !== 1 || files[0]?.filename !== filePath || files[0]?.status !== 'modified') fail('recovery PR changed a non-Dockerfile path');
+  const actual = await readVerifiedFile(api, pr.head.sha, filePath);
   if (actual.text !== projected.content) fail('recovery PR bytes differ from independently projected signed delta');
   return { state: 'current', head: pr.head.sha };
 }
 
-async function postMergeProof(api, pr, config, source, now) {
+async function postMergeProof(api, pr, config, source, now, filePath = 'Dockerfile') {
   if (pr.merged !== true || !SHA.test(pr.merge_commit_sha || '') || !pr.merged_at) fail('recovery PR is not provably merged');
   const merged = await api.get('/git/commits/' + pr.merge_commit_sha);
   if (merged?.parents?.length !== 2 || !SHA.test(pr.head?.sha || '')
@@ -124,11 +141,11 @@ async function postMergeProof(api, pr, config, source, now) {
     fail('recovery merge commit does not have the exact trusted PR head and accepted-main parents');
   }
   const [accepted, parent, comparison] = await Promise.all([
-    readVerifiedFile(api, pr.merge_commit_sha),
-    readVerifiedFile(api, merged.parents[0].sha),
+    readVerifiedFile(api, pr.merge_commit_sha, filePath),
+    readVerifiedFile(api, merged.parents[0].sha, filePath),
     api.get('/compare/' + merged.parents[0].sha + '...' + pr.merge_commit_sha),
   ]);
-  if (comparison?.files?.length !== 1 || comparison.files[0]?.filename !== 'Dockerfile'
+  if (comparison?.files?.length !== 1 || comparison.files[0]?.filename !== filePath
     || comparison.files[0]?.status !== 'modified') fail('merged recovery changed an unrelated path');
   const projected = source.project(source.original, source.signed, parent.text);
   if (projected.state !== 'projected' || projected.content !== accepted.text) {
