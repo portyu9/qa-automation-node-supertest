@@ -155,14 +155,31 @@ export async function runStaleDockerFallback({ api, ownerApi, assessment, config
   });
   const projected = project(original.text, signed.text, live.text);
   const marker = sourceMarker(number, head);
+  const name = branchName(number, head);
+  let revision = await maybeRef(api, name);
+  let pr = await recoveryPull(api, name);
+  // A recovered merge has made the source delta "already accepted", but it
+  // MUST NOT shortcut exact-merge post-merge attestation and close the source.
+  if (projected.state === 'already-accepted' && pr?.merged === true) {
+    const result = await postMergeProof(api, pr, config, { original: original.text, signed: signed.text, project }, null, now);
+    if (result.state !== 'verified') return { ...result, number: pr.number };
+    const latest = await api.get('/pulls/' + number);
+    if (latest.state !== 'open' || latest.head?.sha !== head) return { state: 'source-advanced-retry' };
+    await api.post('/issues/' + number + '/comments', { body: marker + '\nRecovery PR #' + pr.number + ' merged at ' + pr.merge_commit_sha + '; exact-commit post-merge gates verified. Signed source blob: ' + signed.sha });
+    await api.patch('/pulls/' + number, { state: 'closed' });
+    return { state: 'verified', number: pr.number, mergeCommit: pr.merge_commit_sha };
+  }
   if (projected.state === 'already-accepted') {
+    if (pr && pr.state === 'open') {
+      await api.post('/issues/' + pr.number + '/comments', { body: marker + '\nAlready accepted on main by independent development; recovery PR is superseded.' });
+      await api.patch('/pulls/' + pr.number, { state: 'closed' });
+    }
+    const latest = await api.get('/pulls/' + number);
+    if (latest.state !== 'open' || latest.head?.sha !== head) return { state: 'source-advanced-retry' };
     await api.post('/issues/' + number + '/comments', { body: marker + '\nAccepted main already contains this exact verified signed Docker update; no duplicate PR.' });
     await api.patch('/pulls/' + number, { state: 'closed' });
     return { state: 'already-accepted', sourceBlob: signed.sha, mainSha: current.baseSha };
   }
-  const name = branchName(number, head);
-  let revision = await maybeRef(api, name);
-  let pr = await recoveryPull(api, name);
   if (!revision && pr) fail('recovery PR exists without its immutable source branch');
   if (!revision) {
     if ((await baseSha(api, config.baseBranch)) !== current.baseSha) return { state: 'main-advanced-retry' };
@@ -194,14 +211,7 @@ export async function runStaleDockerFallback({ api, ownerApi, assessment, config
   }
   pr = await api.get('/pulls/' + pr.number);
   if (pr.state === 'closed' && pr.merged !== true) fail('recovery PR was closed without a verified merge');
-  if (pr.merged === true) {
-    const result = await postMergeProof(api, pr, config, { original: original.text, signed: signed.text, project }, live, now);
-    if (result.state !== 'verified') return { ...result, number: pr.number };
-    const latest = await api.get('/pulls/' + number);
-    await api.post('/issues/' + number + '/comments', { body: marker + '\nRecovery PR #' + pr.number + ' merged at ' + pr.merge_commit_sha + '; exact-commit post-merge gates verified. Signed source blob: ' + signed.sha });
-    if (latest.state === 'open' && latest.head?.sha === head) await api.patch('/pulls/' + number, { state: 'closed' });
-    return { state: 'verified', number: pr.number, mergeCommit: pr.merge_commit_sha };
-  }
+  if (pr.merged === true) fail('merged recovery PR does not contain verified signed source update');
   if (pr.state !== 'open') fail('unexpected recovery PR state');
   if ((await baseSha(api, config.baseBranch)) !== current.baseSha) return { state: 'main-advanced-retry' };
   let validity = await validateRecoveryBranch(api, name, pr, number, head, projected, current.baseSha);
