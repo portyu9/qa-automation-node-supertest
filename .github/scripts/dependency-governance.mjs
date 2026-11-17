@@ -640,6 +640,8 @@ export function validateConfig(config) {
     '.github/dependency-governance.json',
     '.github/scripts/dependency-governance.mjs',
     '.github/scripts/dependency-governance.selfcheck.mjs',
+    '.github/scripts/dependency-stale-fallback.mjs',
+    '.github/scripts/dependency-stale-fallback.selfcheck.mjs',
     '.github/scripts/validate_codeql_sarif.py',
     '.github/scripts/validate_codeql_sarif_selfcheck.py',
     '.github/scripts/validate_security_stack.py',
