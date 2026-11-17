@@ -159,7 +159,7 @@ test('signed Docker image delta projects onto unrelated current-main changes wit
     sourceBaseText: old,
     signedHeadText: signedHead,
     currentMainText: advancedMain,
-    signedMetadata: [{ name: 'node', version: '24.22.3', updateType: 'version-update:semver-patch' }],
+    signedMetadata: [{ name: 'node', version: '24.22.3-trixie-slim', updateType: 'version-update:semver-patch' }],
     allowedImages: config.ecosystems.docker.allowedImages,
   };
   const outcome = projectSignedDockerDelta(request);
@@ -185,6 +185,20 @@ test('signed Docker image delta projects onto unrelated current-main changes wit
       currentMainText: advancedMain.replace('ARG DEBIAN_PIN=reviewed', 'ARG EXTRA=1\nARG DEBIAN_PIN=reviewed'),
     }),
     /line structure/,
+  );
+  assert.throws(
+    () => projectSignedDockerDelta({
+      ...request,
+      signedMetadata: [{ name: 'node', version: '24.22.3', updateType: 'version-update:semver-patch' }],
+    }),
+    /must exactly match/,
+  );
+  assert.throws(
+    () => projectSignedDockerDelta({
+      ...request,
+      signedMetadata: [...request.signedMetadata, ...request.signedMetadata],
+    }),
+    /must exactly match/,
   );
   // Any signed commit that also changes a non-FROM line is not an eligible bot source.
   assert.throws(
