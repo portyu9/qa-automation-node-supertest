@@ -67,7 +67,9 @@
     ".github/scripts/dependency-recovery-policy.selfcheck.mjs",
     ".github/codeql-autofix.json",
     ".github/workflows/codeql-autofix.yml",
-    ".github/scripts/codeql-autofix-wrapper.selfcheck.mjs"
+    ".github/scripts/codeql-autofix-wrapper.selfcheck.mjs",
+    ".github/scripts/dependency-stale-fallback.mjs",
+    ".github/scripts/dependency-stale-fallback.selfcheck.mjs"
   ],
   "ecosystems": {
     "npm": {

@@ -5,6 +5,7 @@ import process from 'node:process';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import governanceConfig from '../dependency-governance.json' with { type: 'json' };
+import { runStaleDockerFallback, reportStaleRecoveryIncident } from './dependency-stale-fallback.mjs';
 
 const DEP_SECTIONS = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'];
 const PAGE_SIZE = 100;
@@ -639,6 +640,8 @@ export function validateConfig(config) {
     '.github/dependency-governance.json',
     '.github/scripts/dependency-governance.mjs',
     '.github/scripts/dependency-governance.selfcheck.mjs',
+    '.github/scripts/dependency-stale-fallback.mjs',
+    '.github/scripts/dependency-stale-fallback.selfcheck.mjs',
     '.github/scripts/validate_codeql_sarif.py',
     '.github/scripts/validate_codeql_sarif_selfcheck.py',
     '.github/scripts/validate_security_stack.py',
@@ -1131,7 +1134,7 @@ async function validateChangeSemantics({ api, pull, files, ecosystem, metadata, 
   };
 }
 
-async function qualificationForHead(api, pull, config) {
+export async function qualificationForHead(api, pull, config) {
   const runs = await api.paginate(
     `/actions/runs?head_sha=${encodeURIComponent(pull.head.sha)}&event=pull_request`,
     'workflow_runs',
@@ -1390,11 +1393,18 @@ export async function requestDependabotRefresh(ownerApi, assessment, config, { o
   const headSha = String(assessment.pull.head?.sha || '');
   const markerFor = (command) => `${OWNER_REFRESH_MARKER}${headSha}:${assessment.baseSha}:${command} -->`;
   const comments = await ownerApi.paginate(`/issues/${number}/comments`);
-  const matching = (command) => comments.filter((comment) =>
-    String(comment.body || '').includes(markerFor(command))
-    && comment.user?.login === config.ownerApprovalLogin
-    && comment.user?.id === config.ownerApprovalUserId
-    && comment.performed_via_github_app == null);
+  // Bind the lease to the immutable signed HEAD, not to a moving accepted main.
+  // Otherwise every unrelated main advance resets the timer and can stall forever.
+  const matching = (command) => comments.filter((comment) => {
+    const prefix = `${OWNER_REFRESH_MARKER}${headSha}:`;
+    const suffix = `:${command} -->`;
+    const validMarker = String(comment.body || '').split('\n').some((line) =>
+      line.startsWith(prefix) && line.endsWith(suffix)
+      && /^[0-9a-f]{40}$/.test(line.slice(prefix.length, -suffix.length)));
+    return validMarker && comment.user?.login === config.ownerApprovalLogin
+      && comment.user?.id === config.ownerApprovalUserId
+      && comment.performed_via_github_app == null;
+  });
   const priorRebases = matching('rebase');
   const priorRecreates = matching('recreate');
   if (priorRebases.length > 1 || priorRecreates.length > 1) {
@@ -1426,7 +1436,7 @@ export async function requestDependabotRefresh(ownerApi, assessment, config, { o
   return true;
 }
 
-async function assessPull(api, number, config, { includeQualification = true } = {}) {
+export async function assessPull(api, number, config, { includeQualification = true } = {}) {
   const pull = await getPull(api, number);
   const baseSha = await getCurrentBaseSha(api, config.baseBranch);
   let files = [];
@@ -1654,6 +1664,23 @@ async function processPull(api, ownerApi, number, config, { allowMerge, includeQ
   }
 
   await requestDependabotRefresh(ownerApi, assessment, config);
+  let fallbackResult = null;
+  try {
+    fallbackResult = await runStaleDockerFallback({
+      api, ownerApi, assessment, config, allowMerge,
+      helpers: { verifyOwnerIdentity, assessPull, projectSignedDockerDelta, qualificationForHead },
+    });
+  } catch (error) {
+    // Governance MUST fail and record a durable incident after an expired
+    // native lease; a successful hourly scheduler is not a recovery outcome.
+    const incident = await reportStaleRecoveryIncident(
+      api, number, assessment.pull.head?.sha, error,
+    );
+    throw new Error('Dependency fallback incident #' + incident.incident + ': ' + error.message);
+  }
+  if (['verified', 'already-accepted'].includes(fallbackResult?.state)) {
+    return { skipped: false, assessment, merged: fallbackResult.state === 'verified', fallbackResult };
+  }
   const mergeAttempt = await maybeMerge(api, ownerApi, assessment, config, allowMerge);
   const finalAssessment = mergeAttempt.refreshed || assessment;
   const body = renderComment({
@@ -1662,7 +1689,12 @@ async function processPull(api, ownerApi, number, config, { allowMerge, includeQ
     merged: mergeAttempt.merged,
     mergeDeferred: mergeAttempt.mergeDeferred === true,
     dispatches: mergeAttempt.dispatches || [],
-  });
+  }) + (fallbackResult && fallbackResult.state !== 'not-stale-only'
+    ? '\n\n### Independent Docker recovery\n\n'
+      + 'State: **' + fallbackResult.state + '**. '
+      + (fallbackResult.number ? 'Recovery PR #' + fallbackResult.number + '. ' : '')
+      + 'No merge bypass; all recovered heads require separate exact-head qualification.\n'
+    : '');
   await upsertComment(api, number, config.statusCommentMarker, body);
 
   const failedDispatches = (mergeAttempt.dispatches || []).filter(
