@@ -254,7 +254,6 @@ async function replayMissingPostMergeDispatches(api, pr, config, missing, now) {
   if (!Array.isArray(comments)) fail('missing post-merge retry history');
   const receipts = comments.filter((item) =>
     item.user?.login === 'github-actions[bot]' && item.user?.id === 41898282
-    && item.performed_via_github_app == null
     && String(item.body || '').split('\n').includes(marker));
   const receiptTimes = receipts.map((item) => exactTime(item.created_at, now));
   if (receiptTimes.includes(null)) fail('unverifiable post-merge retry timestamp');
