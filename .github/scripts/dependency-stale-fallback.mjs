@@ -153,11 +153,6 @@ async function reconcileOwnerCiWake({
     || pr.user?.login !== 'github-actions[bot]' || pr.user?.id !== 41898282) {
     fail('owner CI wake source PR, branch, or exact recovery head drifted');
   }
-  const branchProof = await validateRecoveryBranch(
-    api, branch, pr, number, head, projected, mainSha, config, ecosystem, filePath,
-  );
-  if (branchProof.state !== 'current') return { state: 'wake-main-advanced-retry' };
-
   const marker = ownerWakeMarker(number, head, revision);
   const [comments, events] = await Promise.all([
     ownerApi.paginate('/issues/' + pr.number + '/comments'),
@@ -202,6 +197,11 @@ async function reconcileOwnerCiWake({
   } else if (closes.length > 0) {
     fail('owner CI wake PR state and event history disagree');
   }
+
+  const branchProof = await validateRecoveryBranch(
+    api, branch, pr, number, head, projected, mainSha, config, ecosystem, filePath,
+  );
+  if (branchProof.state !== 'current') return { state: 'wake-main-advanced-retry' };
 
   const [source, accepted, fresh, ref] = await Promise.all([
     api.get('/pulls/' + number), baseSha(api, config.baseBranch),
@@ -411,7 +411,7 @@ export async function runStaleDockerFallback({ api, ownerApi, assessment, config
       api, ownerApi, pr, number, head, branch: name, revision,
       mainSha: current.baseSha, projected, config, filePath, ecosystem, now,
     });
-    return { ...wake, number: pr.number, head: revision };
+    return { ...(wake || { state: 'recovery-pr-created' }), number: pr.number, head: revision };
   }
   pr = await api.get('/pulls/' + pr.number);
   if (pr.merged === true) fail('merged recovery PR does not contain verified signed source update');
