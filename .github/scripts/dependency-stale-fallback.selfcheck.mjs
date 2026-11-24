@@ -396,7 +396,7 @@ test('an advanced accepted main cannot authorize replay of an old owner CI wake'
   f.filesByRef.set(f.state.main, advanced);
   assert.equal((await run(f)).state, 'wake-main-advanced-retry');
   assert.equal(f.state.prs[0].state, 'closed');
-  assert.equal(f.state.ownerPatches.length, 2);
+  assert.equal(f.state.ownerPatches.length, 1, 'failed reopen is not an accepted server-side mutation');
 });
 
 const actionPath = '.github/workflows/docs.yml';
