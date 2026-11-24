@@ -157,6 +157,11 @@ function fixture({
       throw new Error('owner paginate ' + path);
     },
     async patch(path, body) {
+      // Simulate failed HTTP mutation before any server-side state transition.
+      if (body.state === 'open' && state.wakeFail === 'after-close') {
+        state.wakeFail = null;
+        throw new Error('injected interruption after owner close');
+      }
       state.ownerPatches.push({ path, body });
       const pr = state.prs[0];
       pr.state = body.state;
@@ -164,10 +169,6 @@ function fixture({
         pr.closed_at = '2026-11-17T03:59:59Z';
         state.wakeEvents.push({ event: 'closed', actor: owner, created_at: pr.closed_at });
       } else if (body.state === 'open') {
-        if (state.wakeFail === 'after-close') {
-          state.wakeFail = null;
-          throw new Error('injected interruption after owner close');
-        }
         pr.closed_at = null;
         state.wakeEvents.push({ event: 'reopened', actor: owner, created_at: '2026-11-17T04:00:00Z' });
       }
