@@ -112,6 +112,7 @@ function fixture({
         state.retryComments.push({
           id: 401 + state.retryComments.length,
           user: { login: 'github-actions[bot]', id: 41898282 },
+          performed_via_github_app: { id: 15368, slug: 'github-actions' },
           created_at: state.now.toISOString(), body: body.body,
         });
         return {};
