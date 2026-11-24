@@ -248,7 +248,9 @@ test('interrupted branch creation resumes only from exact verified Docker-only t
   const f = fixture();
   await run(f);
   const recoveryBranch = [...f.state.refs.keys()][0];
-  f.state.prs.splice(0); // interruption after ref publication, before PR API readback
+  f.state.prs.splice(0);
+  f.state.wakeComments.length = 0;
+  f.state.wakeEvents.length = 0; // Simulate no PR publication: no owner-wake audit exists yet. // interruption after ref publication, before PR API readback
   const resumed = await run(f);
   assert.equal(resumed.state, 'recovery-pr-created');
   assert.equal(f.state.refs.size, 1);
@@ -257,6 +259,8 @@ test('interrupted branch creation resumes only from exact verified Docker-only t
   await run(tampered);
   const revision = tampered.state.refs.values().next().value;
   tampered.state.prs.splice(0);
+  tampered.state.wakeComments.length = 0;
+  tampered.state.wakeEvents.length = 0;
   tampered.filesByRef.set(revision, before);
   await assert.rejects(() => run(tampered), /preexisting branch is not an exact signed Dockerfile-only/);
 });
@@ -266,6 +270,8 @@ test('main advancing after an orphaned branch safely reprojects, preserves accep
   await run(f);
   const old = f.state.refs.values().next().value;
   f.state.prs.splice(0);
+  f.state.wakeComments.length = 0;
+  f.state.wakeEvents.length = 0; // Simulate no PR publication: no owner-wake audit exists yet.
   f.state.main = 'f'.repeat(40);
   const newer = advanced.replace('accepted-change', 'newly-accepted-pin');
   f.filesByRef.set(f.state.main, newer);
@@ -483,6 +489,8 @@ test('Actions recovery resumes orphaned branch and records typed incidents witho
   const f = actionsFixture();
   await run(f);
   f.state.prs.splice(0);
+  f.state.wakeComments.length = 0;
+  f.state.wakeEvents.length = 0; // Simulate no PR publication: no owner-wake audit exists yet.
   assert.equal((await run(f)).state, 'recovery-pr-created');
   assert.equal(f.state.prs.length, 1);
   const incident = await reportStaleRecoveryIncident(f.api, 41, head, new Error('injected actions timeout'), 'github-actions');
